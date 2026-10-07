@@ -1,6 +1,9 @@
 // src/features/orderflow/domain/kline.ts
 
-import { isDaySessionTick } from '../../../lib/intraday-session';
+import {
+    filterDaySession,
+    isDaySessionTick,
+} from '../../../lib/intraday-session';
 import type { SecurityType } from '../../../lib/types/contract';
 import type { Candle, KBars } from '../../../lib/types/market';
 import { aggregate, kbarsToCandles, wallClockToUtc } from '../../../lib/utils/kbars';
@@ -19,10 +22,10 @@ export function orderFlowHistoryBars(
     dayOnly: boolean,
 ): Candle[] {
     const raw = kbarsToCandles(source);
-    const filtered = dayOnly
-        ? raw.filter((bar) => isDaySessionTick(securityType, bar.time - 1))
-        : raw;
-    return aggregate(filtered, minutes);
+    return aggregate(
+        dayOnly ? filterDaySession(securityType, raw) : raw,
+        minutes,
+    );
 }
 
 export function projectOrderFlowTick(

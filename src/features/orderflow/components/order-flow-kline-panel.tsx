@@ -32,6 +32,9 @@ import { getOrderFlowRuntime } from '../runtime/order-flow-runtime';
 import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 import * as styles from './order-flow-kline-panel.css';
 
+const MAX_PENDING_TICKS = 50_000;
+const PENDING_TRIM_BATCH = 10_000;
+
 const TIMEFRAMES = [
     { label: '1m', minutes: 1, days: 3 },
     { label: '5m', minutes: 5, days: 10 },
@@ -168,8 +171,10 @@ export function OrderFlowKlinePanel({
                 // History/live reconciliation is intentionally conservative:
                 // buffer while the REST snapshot is in flight, then only
                 // append buckets newer than the returned history tail.
-                if (pendingTicksRef.current.length >= 50_000) {
-                    pendingTicksRef.current.shift();
+                if (pendingTicksRef.current.length >= MAX_PENDING_TICKS) {
+                    // Trim in a batch instead of shifting one element on
+                    // every high-rate tick once the cap is reached.
+                    pendingTicksRef.current.splice(0, PENDING_TRIM_BATCH);
                 }
                 pendingTicksRef.current.push(tick);
                 return;
@@ -362,26 +367,22 @@ export function OrderFlowKlinePanel({
                 />
             </div>
             <div ref={hostRef} className={styles.host}>
-                {(loading || empty || historyError) && (
+                {(loading || empty) && (
                     <div className={styles.status}>
                         <AsyncStatus
                             phase={
                                 loading
                                     ? 'loading'
-                                    : historyError && empty
+                                    : historyError
                                       ? 'error'
-                                      : empty
-                                        ? 'empty'
-                                        : 'idle'
+                                      : 'empty'
                             }
                             text={
                                 loading
                                     ? `載入 ${tf.label} Order Flow K 線…`
-                                    : historyError && empty
+                                    : historyError
                                       ? '歷史 K 線無法取得，等待即時成交'
-                                      : empty
-                                        ? '尚無 K 線資料'
-                                        : ''
+                                      : '尚無 K 線資料'
                             }
                         />
                     </div>

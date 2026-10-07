@@ -52,7 +52,7 @@ function tick(
 }
 
 describe('Order Flow K-line projection', () => {
-    it('reuses K-bar aggregation and filters night bars before day-only aggregation', () => {
+    it('reuses the native day-session filter before K-bar aggregation', () => {
         const all = orderFlowHistoryBars(history, 5, 'FUT', false);
         expect(all).toHaveLength(2);
         expect(all[0]).toMatchObject({ time: expect.any(Number), open: 100, close: 102, volume: 5 });
