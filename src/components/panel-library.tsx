@@ -73,6 +73,7 @@ const PANEL_ICONS: Record<BlockType, LucideIcon> = {
     dock: Briefcase,
     chart: LineChart,
     orderflow_kline: LineChart,
+    footprint: Rows,
     intraday: ChartSpline,
     intradaywall: Grid2x2,
     depth: Layers,

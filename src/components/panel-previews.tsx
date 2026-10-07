@@ -173,6 +173,42 @@ export const PANEL_PREVIEWS: Record<BlockType, ReactNode> = {
             <Ln x={70} y={72} w={42} color={accent} o={0.8} />
         </Frame>
     ),
+    footprint: (
+        <Frame>
+            {[0, 1, 2, 3, 4].map((row) =>
+                [0, 1, 2, 3].map((col) => {
+                    const buy = (row + col) % 3 !== 0;
+                    return (
+                        <g key={`${row}-${col}`}>
+                            <rect
+                                x={10 + col * 26}
+                                y={8 + row * 12}
+                                width='23'
+                                height='9'
+                                fill={buy ? up : down}
+                                fillOpacity={0.08 + ((row + col) % 4) * 0.07}
+                            />
+                            <Ln
+                                x={12 + col * 26}
+                                y={11 + row * 12}
+                                w={7}
+                                color={down}
+                                o={0.7}
+                            />
+                            <Ln
+                                x={24 + col * 26}
+                                y={11 + row * 12}
+                                w={7}
+                                color={up}
+                                o={0.8}
+                            />
+                        </g>
+                    );
+                }),
+            )}
+            <line x1='8' y1='69' x2='112' y2='69' stroke={accent} strokeOpacity='0.7' />
+        </Frame>
+    ),
     intraday: (
         <Frame>
             <line

@@ -12,6 +12,7 @@ import * as styles from './App.css';
 import { BottomDock } from './components/bottom-dock';
 import { AsyncStatus, type AsyncPhase } from './components/async-status';
 import { CandleChart } from './components/candle-chart';
+import { FootprintPanel } from './features/orderflow/components/footprint-panel';
 import { OrderFlowKlinePanel } from './features/orderflow/components/order-flow-kline-panel';
 import { ChipsCard } from './components/chips-card';
 import { ComboListPanel } from './components/combo-list';
@@ -128,6 +129,7 @@ import {
 const POPOUT_TYPES: ReadonlySet<string> = new Set([
     'chart',
     'orderflow_kline',
+    'footprint',
     'intraday',
     'depth',
     'ticket',
@@ -257,6 +259,19 @@ function BlockBody({
         case 'orderflow_kline':
             return contract ? (
                 <OrderFlowKlinePanel
+                    contract={contract}
+                    sessionMode={block.chartSession}
+                    onSessionModeChange={(chartSession) =>
+                        onSessionConfigChange(block.id, { chartSession })
+                    }
+                />
+            ) : (
+                <BlockPlaceholder phase={missingContractPhase} />
+            );
+        case 'footprint':
+            return contract ? (
+                <FootprintPanel
+                    panelId={block.id}
                     contract={contract}
                     sessionMode={block.chartSession}
                     onSessionModeChange={(chartSession) =>
@@ -482,6 +497,9 @@ function indexBlockMessage(type: BlockType): string | null {
     }
     if (type === 'orderflow_kline') {
         return '指數沒有逐筆 Tick 串流，Order Flow K 線不支援';
+    }
+    if (type === 'footprint') {
+        return '指數沒有逐筆 Tick 串流，Footprint 不支援';
     }
     if (type === 'flash' || type === 'grid' || type === 'oddspread') {
         return '指數商品不可下單';

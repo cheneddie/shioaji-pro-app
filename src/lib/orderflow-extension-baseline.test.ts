@@ -33,15 +33,35 @@ describe('Order Flow extension native-panel baseline', () => {
         },
     );
 
-    it('registers the Development 3 K-line additively while future panels remain absent', () => {
+    it('keeps Development 3 K-line and adds Development 4 Footprint without future panels', () => {
         expect(BLOCK_META.orderflow_kline).toMatchObject({
             category: 'market',
             pinnable: true,
             singleton: false,
         });
         expect(switchCaseBody('orderflow_kline')).toContain('<OrderFlowKlinePanel');
-        expect('footprint' in BLOCK_META).toBe(false);
+        expect(BLOCK_META.footprint).toMatchObject({
+            category: 'market',
+            pinnable: true,
+            singleton: false,
+        });
+        expect(switchCaseBody('footprint')).toContain('<FootprintPanel');
         expect('flowladder' in BLOCK_META).toBe(false);
+    });
+
+    it('keeps Footprint isolated from native panels and direct market subscriptions', () => {
+        const source = readFileSync(
+            new URL('../features/orderflow/components/footprint-panel.tsx', import.meta.url),
+            'utf8',
+        );
+        expect(source).not.toContain("from '../../../components/candle-chart'");
+        expect(source).not.toContain("from '../../../components/flash-order'");
+        expect(source).not.toContain("from '../../../components/vol-profile'");
+        expect(source).not.toContain("from '../../../lib/stream'");
+        expect(source).not.toContain('retainQuote');
+        expect(source).toContain('getOrderFlowRuntime');
+        expect(source).toContain('runtime.subscribeTicks');
+        expect(source).toContain('runtime.loadHistory');
     });
 
     it('keeps the Order Flow K-line isolated from native execution, indicator and drawing implementations', () => {

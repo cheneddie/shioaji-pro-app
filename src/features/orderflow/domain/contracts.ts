@@ -40,6 +40,14 @@ export interface FootprintLevel {
     neutralVolume: number;
     totalVolume: number;
     delta: number;
+    /** Diagonal ask-vs-bid imbalance. */
+    buyImbalance?: boolean;
+    /** Diagonal bid-vs-ask imbalance. */
+    sellImbalance?: boolean;
+    /** Same-price buy-vs-sell imbalance. */
+    buyHorizontalImbalance?: boolean;
+    /** Same-price sell-vs-buy imbalance. */
+    sellHorizontalImbalance?: boolean;
 }
 
 export interface FootprintBar {

@@ -103,6 +103,7 @@ describe('panel session config (issue #73)', () => {
         blocks: [
             { id: 'c1', type: 'chart', pin: null },
             { id: 'of1', type: 'orderflow_kline', pin: null },
+            { id: 'fp1', type: 'footprint', pin: null },
             { id: 'i1', type: 'intraday', pin: null },
         ],
         layout: [],
@@ -114,10 +115,13 @@ describe('panel session config (issue #73)', () => {
         expect(a.blocks[1]).toBe(ws.blocks[1]);
         const of = withBlockSessionConfig(a, 'of1', { chartSession: 'day' });
         expect(of.blocks[1]!.chartSession).toBe('day');
-        const b = withBlockSessionConfig(of, 'i1', { intradaySession: 'night' });
-        expect(b.blocks[2]!.intradaySession).toBe('night');
+        const fp = withBlockSessionConfig(of, 'fp1', { chartSession: 'day' });
+        expect(fp.blocks[2]!.chartSession).toBe('day');
+        const b = withBlockSessionConfig(fp, 'i1', { intradaySession: 'night' });
+        expect(b.blocks[3]!.intradaySession).toBe('night');
         expect(b.blocks[0]!.chartSession).toBe('day');
         expect(b.blocks[1]!.chartSession).toBe('day');
+        expect(b.blocks[2]!.chartSession).toBe('day');
         expect(ws.blocks[0]!.chartSession).toBeUndefined(); // immutable
     });
 
@@ -133,6 +137,7 @@ describe('popout session param', () => {
     it('carries the panel choice into the popout URL', () => {
         expect(popoutSessionParam({ id: 'c', type: 'chart', pin: null, chartSession: 'day' })).toEqual({ session: 'day' });
         expect(popoutSessionParam({ id: 'of', type: 'orderflow_kline', pin: null, chartSession: 'day' })).toEqual({ session: 'day' });
+        expect(popoutSessionParam({ id: 'fp', type: 'footprint', pin: null, chartSession: 'day' })).toEqual({ session: 'day' });
         expect(popoutSessionParam({ id: 'i', type: 'intraday', pin: null, intradaySession: 'night' })).toEqual({ session: 'night' });
         expect(popoutSessionParam({ id: 'c', type: 'chart', pin: null })).toEqual({});
         expect(popoutSessionParam({ id: 'd', type: 'depth', pin: null })).toEqual({});
