@@ -161,11 +161,16 @@ export const PANEL_PREVIEWS: Record<BlockType, ReactNode> = {
                 { x: 84, o: 28, c: 18, h: 14, l: 32 },
                 { x: 98, o: 18, c: 24, h: 14, l: 28 },
             ])}
-            <circle cx='28' cy='52' r='4' fill={down} fillOpacity='0.7' />
-            <circle cx='56' cy='46' r='6' fill={up} fillOpacity='0.7' />
-            <circle cx='84' cy='38' r='3' fill={up} fillOpacity='0.7' />
-            <Ln x={8} y={68} w={34} color={accent} o={0.8} />
-            <Ln x={76} y={68} w={34} color={accent} o={0.8} />
+            <rect x='10' y='61' width='8' height='7' fill={down} fillOpacity='0.55' />
+            <rect x='22' y='57' width='8' height='11' fill={up} fillOpacity='0.7' />
+            <rect x='34' y='63' width='8' height='5' fill={down} fillOpacity='0.55' />
+            <rect x='46' y='54' width='8' height='14' fill={up} fillOpacity='0.75' />
+            <rect x='58' y='59' width='8' height='9' fill={up} fillOpacity='0.65' />
+            <rect x='70' y='56' width='8' height='12' fill={down} fillOpacity='0.55' />
+            <rect x='82' y='51' width='8' height='17' fill={up} fillOpacity='0.8' />
+            <rect x='94' y='60' width='8' height='8' fill={down} fillOpacity='0.55' />
+            <Ln x={8} y={72} w={42} color={accent} o={0.8} />
+            <Ln x={70} y={72} w={42} color={accent} o={0.8} />
         </Frame>
     ),
     intraday: (
