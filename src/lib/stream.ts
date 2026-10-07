@@ -77,6 +77,11 @@ const oddQuoteListeners = new Map<string, Set<Listener>>();
 const statusListeners = new Set<Listener>();
 const orderEventListeners = new Set<(ev: OrderEventReport) => void>();
 const tickTapeListeners = new Set<(tick: SseTick) => void>();
+// Order Flow needs every regular-lot event before React's 50 ms notification
+// batching. Keep these listeners separate from onAnyTick(), whose long-standing
+// contract is real trades only (!simtrade && volume > 0).
+const rawTickListeners = new Set<(tick: SseTick) => void>();
+const bidAskTapeListeners = new Set<(bidask: SseBidAsk) => void>();
 const oddTickListeners = new Set<(tick: SseTick) => void>();
 const contractEventListeners = new Set<
     (event: ContractChangeEvent) => void
@@ -206,6 +211,16 @@ function ingestTick(tick: SseTick) {
     const state = nextTickState(quotes.get(tick.code), tick);
     quotes.set(tick.code, state);
     emitQuote(tick.code);
+    // Raw consumers (Order Flow) see every regular-lot tick, including
+    // simtrade / zero-volume events. A listener failure must never block the
+    // existing tape/trigger path.
+    rawTickListeners.forEach((listener) => {
+        try {
+            listener(tick);
+        } catch (err) {
+            console.error('[stream] raw tick listener threw', err);
+        }
+    });
     // flash only on real deals — simtrade (試撮) updates must not blink
     if (!tick.simtrade && tick.volume > 0) {
         tickTapeListeners.forEach((l) => l(tick));
@@ -238,6 +253,16 @@ function handleBidAsk(raw: string) {
 function ingestBidAsk(bidask: SseBidAsk) {
     quotes.set(bidask.code, nextBidAskState(quotes.get(bidask.code), bidask));
     emitQuote(bidask.code);
+    // Raw book consumers must observe every event rather than the 50 ms
+    // React notification snapshots. This is additive: the quote store and
+    // its batching semantics remain unchanged.
+    bidAskTapeListeners.forEach((listener) => {
+        try {
+            listener(bidask);
+        } catch (err) {
+            console.error('[stream] bidask listener threw', err);
+        }
+    });
 }
 
 const INDEX_UPSTREAM_ALIASES: Record<string, string> = {
@@ -893,6 +918,26 @@ export function onAnyTick(listener: (tick: SseTick) => void) {
     tickTapeListeners.add(listener);
     return () => {
         tickTapeListeners.delete(listener);
+    };
+}
+
+/** Every regular-lot tick before React quote notification batching.
+ *  Unlike onAnyTick(), this intentionally includes simtrade / zero-volume
+ *  events. Continuous-contract aliases follow the same ingest semantics as
+ *  the quote store, so consumers can subscribe by display code. */
+export function onRawTick(listener: (tick: SseTick) => void) {
+    rawTickListeners.add(listener);
+    return () => {
+        rawTickListeners.delete(listener);
+    };
+}
+
+/** Every regular-lot bid/ask event before React quote notification batching.
+ *  Odd-lot books remain isolated in the odd quote store. */
+export function onAnyBidAsk(listener: (bidask: SseBidAsk) => void) {
+    bidAskTapeListeners.add(listener);
+    return () => {
+        bidAskTapeListeners.delete(listener);
     };
 }
 
