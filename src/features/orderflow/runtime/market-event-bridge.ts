@@ -37,7 +37,7 @@ export interface OrderFlowRawBook {
 }
 
 function finitePrice(value: string | undefined): number | null {
-    if (value === undefined) return null;
+    if (value === undefined || value.trim() === '') return null;
     const price = Number(value);
     return Number.isFinite(price) ? price : null;
 }

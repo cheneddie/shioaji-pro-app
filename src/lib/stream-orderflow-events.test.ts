@@ -245,6 +245,21 @@ describe('Order Flow market-event bridge', () => {
         }));
     });
 
+    it('normalizes blank or non-numeric prices as null instead of price zero', async () => {
+        const bridge = await import('../features/orderflow/runtime/market-event-bridge');
+        expect(bridge.normalizeOrderFlowTick(regularTick('TXFF6', { close: '' }))).toMatchObject({
+            price: null,
+        });
+        const normalized = bridge.normalizeOrderFlowBook(regularBook('TXFF6', {
+            bid_price: ['', 'bad'],
+            bid_volume: [20, 15],
+            ask_price: ['27110', ''],
+            ask_volume: [12, 18],
+        }));
+        expect(normalized.bids.map((level) => level.price)).toEqual([null, null]);
+        expect(normalized.asks.map((level) => level.price)).toEqual([27110, null]);
+    });
+
     it('filters by requested symbol', async () => {
         const { source } = await owner();
         const bridge = await import('../features/orderflow/runtime/market-event-bridge');
