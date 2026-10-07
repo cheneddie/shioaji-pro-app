@@ -25,6 +25,7 @@ A runtime is shared by:
 API base
 + market = region : security_type : exchange
 + display symbol
++ physical source code (target_code when present)
 + session
 ```
 
@@ -36,7 +37,7 @@ Session values are currently:
 
 The session is an ownership/data-partition key in Development 2. Session-hour filtering belongs to the consuming panel/history policy and is not guessed here.
 
-Alias and physical contracts remain separate presentation runtimes when their display symbols differ. Broker-level subscription deduplication continues to be handled by the existing `quote-ownership.ts`, which already coalesces alias/physical ownership through `target_code`.
+Alias and physical contracts remain separate presentation runtimes when their display symbols differ. For a continuous display alias, the current `target_code` is also part of the internal registry key so a rollover creates a fresh runtime instead of retaining the old physical source. The raw bridge listens to that physical source and rewrites only the emitted domain event code back to the display symbol; synthetic alias clones from another physical target are therefore ignored. Broker-level subscription deduplication continues to be handled by the existing `quote-ownership.ts`.
 
 ## Ownership
 

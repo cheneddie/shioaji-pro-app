@@ -277,22 +277,29 @@ describe('Order Flow market-event bridge', () => {
         expect(books).toHaveBeenCalledTimes(1);
     });
 
-    it('delivers a continuous-contract alias exactly once for the alias subscriber', async () => {
+    it('binds a continuous-contract subscriber to its physical source and emits the display code exactly once', async () => {
         const { stream, source } = await owner();
         const bridge = await import('../features/orderflow/runtime/market-event-bridge');
         stream.registerCodeAlias('TXFF6', 'TXFR1');
+        stream.registerCodeAlias('TXFJ6', 'TXFR1');
         const aliasTicks = vi.fn();
         const aliasBooks = vi.fn();
-        bridge.subscribeOrderFlowTicks('TXFR1', aliasTicks);
-        bridge.subscribeOrderFlowBooks('TXFR1', aliasBooks);
+        bridge.subscribeOrderFlowTicks('TXFR1', aliasTicks, 'TXFJ6');
+        bridge.subscribeOrderFlowBooks('TXFR1', aliasBooks, 'TXFJ6');
 
+        // Old physical target may still be subscribed elsewhere during a
+        // rollover grace period. It must not leak into the new runtime.
         source.emit('tick_fop', regularTick('TXFF6'));
         source.emit('bidask_fop', regularBook('TXFF6'));
+        source.emit('tick_fop', regularTick('TXFJ6'));
+        source.emit('bidask_fop', regularBook('TXFJ6'));
 
         expect(aliasTicks).toHaveBeenCalledTimes(1);
         expect(aliasTicks.mock.calls[0]![0].code).toBe('TXFR1');
+        expect(aliasTicks.mock.calls[0]![0].raw.code).toBe('TXFJ6');
         expect(aliasBooks).toHaveBeenCalledTimes(1);
         expect(aliasBooks.mock.calls[0]![0].code).toBe('TXFR1');
+        expect(aliasBooks.mock.calls[0]![0].raw.code).toBe('TXFJ6');
     });
 
     it('unsubscribes bridge consumers cleanly', async () => {

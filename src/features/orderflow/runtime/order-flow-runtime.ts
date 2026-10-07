@@ -38,11 +38,16 @@ function marketOf(contract: ContractBase) {
     ].join(':');
 }
 
+function sourceCodeOf(contract: ContractBase) {
+    return (contract.target_code || contract.code).trim().toUpperCase();
+}
+
 function runtimeKey(contract: ContractBase, session: OrderFlowSession) {
     return JSON.stringify([
         getApiBase(),
         marketOf(contract),
         contract.code.trim().toUpperCase(),
+        sourceCodeOf(contract),
         session,
     ]);
 }
@@ -227,6 +232,7 @@ export class OrderFlowRuntime {
         ensureStream();
         this.releaseTickQuote = retainQuote(this.contract, 'Tick');
         this.releaseBookQuote = retainQuote(this.contract, 'BidAsk');
+        const sourceCode = sourceCodeOf(this.contract);
         this.stopTick = subscribeOrderFlowTicks(
             this.identity.symbol,
             (tick) => {
@@ -236,6 +242,7 @@ export class OrderFlowRuntime {
                 this.tickAggregator.ingest(tick);
                 this.invalidate();
             },
+            sourceCode,
         );
         this.stopBook = subscribeOrderFlowBooks(
             this.identity.symbol,
@@ -243,6 +250,7 @@ export class OrderFlowRuntime {
                 this.bookAggregator.ingest(book);
                 this.invalidate();
             },
+            sourceCode,
         );
         this.stopStatus = subscribeStatusStore(() => {
             const next = getStreamStatus();

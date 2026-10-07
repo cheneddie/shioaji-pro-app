@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
     statusListener: null as null | (() => void),
     offStatus: vi.fn(),
     history: vi.fn(),
+    tickBridgeArgs: [] as unknown[][],
+    bookBridgeArgs: [] as unknown[][],
 }));
 
 vi.mock('../../../lib/runtime', () => ({
@@ -32,16 +34,20 @@ vi.mock('../../../lib/stream', () => ({
 }));
 vi.mock('./market-event-bridge', () => ({
     subscribeOrderFlowTicks: (
-        _code: string,
+        code: string,
         listener: (tick: OrderFlowRawTick) => void,
+        sourceCode?: string,
     ) => {
+        mocks.tickBridgeArgs.push([code, sourceCode]);
         mocks.tickListener = listener;
         return mocks.offTick;
     },
     subscribeOrderFlowBooks: (
-        _code: string,
+        code: string,
         listener: (book: OrderFlowRawBook) => void,
+        sourceCode?: string,
     ) => {
+        mocks.bookBridgeArgs.push([code, sourceCode]);
         mocks.bookListener = listener;
         return mocks.offBook;
     },
@@ -123,6 +129,8 @@ beforeEach(() => {
     mocks.tickListener = null;
     mocks.bookListener = null;
     mocks.statusListener = null;
+    mocks.tickBridgeArgs = [];
+    mocks.bookBridgeArgs = [];
     mocks.retain.mockImplementation(() => {
         const release = vi.fn();
         mocks.releaseFns.push(release);
@@ -156,6 +164,8 @@ describe('shared OrderFlowRuntime ownership', () => {
         ]);
         expect(mocks.tickListener).not.toBeNull();
         expect(mocks.bookListener).not.toBeNull();
+        expect(mocks.tickBridgeArgs).toEqual([['TXFR1', 'TXFF6']]);
+        expect(mocks.bookBridgeArgs).toEqual([['TXFR1', 'TXFF6']]);
 
         releaseA();
         expect(mocks.offTick).not.toHaveBeenCalled();
@@ -168,13 +178,15 @@ describe('shared OrderFlowRuntime ownership', () => {
         expect(mocks.releaseFns.every((fn) => fn.mock.calls.length === 1)).toBe(true);
     });
 
-    it('partitions runtime identity by symbol and session and removes disposed instances from the registry', async () => {
+    it('partitions runtime identity by symbol, physical source and session and removes disposed instances from the registry', async () => {
         const { getOrderFlowRuntime } = await import('./order-flow-runtime');
         const all = getOrderFlowRuntime(contract, 'all');
         const day = getOrderFlowRuntime(contract, 'day');
         const other = getOrderFlowRuntime({ ...contract, code: 'MXFR1', target_code: 'MXFF6' }, 'all');
+        const rolled = getOrderFlowRuntime({ ...contract, target_code: 'TXFJ6' }, 'all');
         expect(day).not.toBe(all);
         expect(other).not.toBe(all);
+        expect(rolled).not.toBe(all);
 
         const release = all.retain();
         release();

@@ -94,21 +94,33 @@ export function normalizeOrderFlowBook(bidask: SseBidAsk): OrderFlowRawBook {
 }
 
 export function subscribeOrderFlowTicks(
-    code: string,
+    displayCode: string,
     listener: (tick: OrderFlowRawTick) => void,
+    sourceCode = displayCode,
 ) {
     return onRawTick((tick) => {
-        if (tick.code !== code || tick.intraday_odd) return;
-        listener(normalizeOrderFlowTick(tick));
+        // Raw listeners see the physical event first and stream.ts may emit
+        // an additional display-alias clone afterwards. Bind Order Flow to
+        // the expected physical source so a continuous-contract rollover
+        // cannot mix the old target into the new runtime.
+        if (tick.code !== sourceCode || tick.intraday_odd) return;
+        listener({
+            ...normalizeOrderFlowTick(tick),
+            code: displayCode,
+        });
     });
 }
 
 export function subscribeOrderFlowBooks(
-    code: string,
+    displayCode: string,
     listener: (book: OrderFlowRawBook) => void,
+    sourceCode = displayCode,
 ) {
     return onAnyBidAsk((bidask) => {
-        if (bidask.code !== code || bidask.intraday_odd) return;
-        listener(normalizeOrderFlowBook(bidask));
+        if (bidask.code !== sourceCode || bidask.intraday_odd) return;
+        listener({
+            ...normalizeOrderFlowBook(bidask),
+            code: displayCode,
+        });
     });
 }
