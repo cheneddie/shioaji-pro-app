@@ -250,6 +250,30 @@ describe('OrderFlowRuntime aggregation and health', () => {
         release();
     });
 
+    it('fans deduped raw ticks out from the shared runtime without extra market listeners', async () => {
+        const { getOrderFlowRuntime } = await import('./order-flow-runtime');
+        const runtime = getOrderFlowRuntime(contract, 'all');
+        const release = runtime.retain();
+        const first = vi.fn();
+        const second = vi.fn();
+        const offFirst = runtime.subscribeTicks(first);
+        runtime.subscribeTicks(second);
+
+        const trade = tick('10:00:00.000', { volume: 4, totalVolume: 104 });
+        mocks.tickListener!(trade);
+        mocks.tickListener!(trade); // reconnect replay
+
+        expect(first).toHaveBeenCalledTimes(1);
+        expect(second).toHaveBeenCalledTimes(1);
+        expect(mocks.tickBridgeArgs).toHaveLength(1);
+
+        offFirst();
+        mocks.tickListener!(tick('10:00:01.000', { volume: 2, totalVolume: 106 }));
+        expect(first).toHaveBeenCalledTimes(1);
+        expect(second).toHaveBeenCalledTimes(2);
+        release();
+    });
+
     it('does not double-count an exact replay after a reconnect status cycle', async () => {
         const { getOrderFlowRuntime } = await import('./order-flow-runtime');
         const runtime = getOrderFlowRuntime(contract, 'all');

@@ -46,6 +46,7 @@ export type BlockType =
     | 'movers'
     | 'dock'
     | 'chart'
+    | 'orderflow_kline'
     | 'intraday'
     | 'intradaywall'
     | 'depth'
@@ -117,7 +118,7 @@ export type SessionConfigPatch = Partial<
 // 開彈出視窗時把面板的時段選擇帶進 URL（session=…）
 export function popoutSessionParam(block: Block): Record<string, string> {
     const session =
-        block.type === 'chart'
+        block.type === 'chart' || block.type === 'orderflow_kline'
             ? block.chartSession
             : block.type === 'intraday'
               ? block.intradaySession
@@ -210,6 +211,14 @@ export const BLOCK_META: Record<
     chart: {
         label: 'K 線圖',
         description: '多週期 K 線與技術指標',
+        category: 'market',
+        pinnable: true,
+        singleton: false,
+        defaultSize: { w: 10, h: 12, minW: 6, minH: 7 },
+    },
+    orderflow_kline: {
+        label: 'Order Flow K 線',
+        description: '逐筆 Order Flow 資料驅動的獨立分析 K 線',
         category: 'market',
         pinnable: true,
         singleton: false,

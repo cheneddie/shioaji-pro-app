@@ -33,9 +33,27 @@ describe('Order Flow extension native-panel baseline', () => {
         },
     );
 
-    it('does not register future Order Flow panels during Development 0', () => {
-        expect('orderflow_kline' in BLOCK_META).toBe(false);
+    it('registers the Development 3 K-line additively while future panels remain absent', () => {
+        expect(BLOCK_META.orderflow_kline).toMatchObject({
+            category: 'market',
+            pinnable: true,
+            singleton: false,
+        });
+        expect(switchCaseBody('orderflow_kline')).toContain('<OrderFlowKlinePanel');
         expect('footprint' in BLOCK_META).toBe(false);
         expect('flowladder' in BLOCK_META).toBe(false);
+    });
+
+    it('keeps the Order Flow K-line isolated from native execution, indicator and drawing implementations', () => {
+        const source = readFileSync(
+            new URL('../features/orderflow/components/order-flow-kline-panel.tsx', import.meta.url),
+            'utf8',
+        );
+        expect(source).not.toContain("from '../../../components/candle-chart'");
+        expect(source).not.toContain('placeQuickOrder');
+        expect(source).not.toContain('ChartDrawingTools');
+        expect(source).not.toContain('IndicatorDialog');
+        expect(source).toContain("from 'lightweight-charts'");
+        expect(source).toContain('getOrderFlowRuntime');
     });
 });

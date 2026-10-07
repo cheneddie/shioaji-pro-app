@@ -12,6 +12,7 @@ import * as styles from './App.css';
 import { BottomDock } from './components/bottom-dock';
 import { AsyncStatus, type AsyncPhase } from './components/async-status';
 import { CandleChart } from './components/candle-chart';
+import { OrderFlowKlinePanel } from './features/orderflow/components/order-flow-kline-panel';
 import { ChipsCard } from './components/chips-card';
 import { ComboListPanel } from './components/combo-list';
 import { ComboTicket } from './components/combo-ticket';
@@ -126,6 +127,7 @@ import {
 
 const POPOUT_TYPES: ReadonlySet<string> = new Set([
     'chart',
+    'orderflow_kline',
     'intraday',
     'depth',
     'ticket',
@@ -249,6 +251,18 @@ function BlockBody({
                         }
                     />
                 </>
+            ) : (
+                <BlockPlaceholder phase={missingContractPhase} />
+            );
+        case 'orderflow_kline':
+            return contract ? (
+                <OrderFlowKlinePanel
+                    contract={contract}
+                    sessionMode={block.chartSession}
+                    onSessionModeChange={(chartSession) =>
+                        onSessionConfigChange(block.id, { chartSession })
+                    }
+                />
             ) : (
                 <BlockPlaceholder phase={missingContractPhase} />
             );
@@ -463,8 +477,8 @@ function indexBlockMessage(type: BlockType): string | null {
     if (type === 'depth' || type === 'depthmap') {
         return '指數 Quote 行情不含五檔委託資料';
     }
-    if (type === 'tape' || type === 'volprofile') {
-        return '指數沒有即時 Tick 串流，此面板不支援盤中更新';
+    if (type === 'tape' || type === 'volprofile' || type === 'orderflow_kline') {
+        return '指數沒有即時 Tick 串流，此 Order Flow 面板不支援';
     }
     if (type === 'flash' || type === 'grid' || type === 'oddspread') {
         return '指數商品不可下單';
@@ -649,6 +663,14 @@ function PopoutView({
                             sessionMode={popoutChartSession}
                         />
                     </>
+                );
+                break;
+            case 'orderflow_kline':
+                body = (
+                    <OrderFlowKlinePanel
+                        contract={contract}
+                        sessionMode={popoutChartSession}
+                    />
                 );
                 break;
             case 'intraday':

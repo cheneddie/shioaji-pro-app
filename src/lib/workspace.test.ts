@@ -102,6 +102,7 @@ describe('panel session config (issue #73)', () => {
     const ws: Workspace = {
         blocks: [
             { id: 'c1', type: 'chart', pin: null },
+            { id: 'of1', type: 'orderflow_kline', pin: null },
             { id: 'i1', type: 'intraday', pin: null },
         ],
         layout: [],
@@ -111,9 +112,12 @@ describe('panel session config (issue #73)', () => {
         const a = withBlockSessionConfig(ws, 'c1', { chartSession: 'day' });
         expect(a.blocks[0]).toEqual({ id: 'c1', type: 'chart', pin: null, chartSession: 'day' });
         expect(a.blocks[1]).toBe(ws.blocks[1]);
-        const b = withBlockSessionConfig(a, 'i1', { intradaySession: 'night' });
-        expect(b.blocks[1]!.intradaySession).toBe('night');
+        const of = withBlockSessionConfig(a, 'of1', { chartSession: 'day' });
+        expect(of.blocks[1]!.chartSession).toBe('day');
+        const b = withBlockSessionConfig(of, 'i1', { intradaySession: 'night' });
+        expect(b.blocks[2]!.intradaySession).toBe('night');
         expect(b.blocks[0]!.chartSession).toBe('day');
+        expect(b.blocks[1]!.chartSession).toBe('day');
         expect(ws.blocks[0]!.chartSession).toBeUndefined(); // immutable
     });
 
@@ -128,6 +132,7 @@ describe('panel session config (issue #73)', () => {
 describe('popout session param', () => {
     it('carries the panel choice into the popout URL', () => {
         expect(popoutSessionParam({ id: 'c', type: 'chart', pin: null, chartSession: 'day' })).toEqual({ session: 'day' });
+        expect(popoutSessionParam({ id: 'of', type: 'orderflow_kline', pin: null, chartSession: 'day' })).toEqual({ session: 'day' });
         expect(popoutSessionParam({ id: 'i', type: 'intraday', pin: null, intradaySession: 'night' })).toEqual({ session: 'night' });
         expect(popoutSessionParam({ id: 'c', type: 'chart', pin: null })).toEqual({});
         expect(popoutSessionParam({ id: 'd', type: 'depth', pin: null })).toEqual({});

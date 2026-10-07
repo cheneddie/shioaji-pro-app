@@ -150,6 +150,24 @@ export const PANEL_PREVIEWS: Record<BlockType, ReactNode> = {
             ))}
         </Frame>
     ),
+    orderflow_kline: (
+        <Frame>
+            {candles([
+                { x: 14, o: 46, c: 34, h: 30, l: 50 },
+                { x: 28, o: 34, c: 26, h: 22, l: 38 },
+                { x: 42, o: 26, c: 32, h: 22, l: 36 },
+                { x: 56, o: 32, c: 20, h: 16, l: 36 },
+                { x: 70, o: 20, c: 28, h: 16, l: 32 },
+                { x: 84, o: 28, c: 18, h: 14, l: 32 },
+                { x: 98, o: 18, c: 24, h: 14, l: 28 },
+            ])}
+            <circle cx='28' cy='52' r='4' fill={down} fillOpacity='0.7' />
+            <circle cx='56' cy='46' r='6' fill={up} fillOpacity='0.7' />
+            <circle cx='84' cy='38' r='3' fill={up} fillOpacity='0.7' />
+            <Ln x={8} y={68} w={34} color={accent} o={0.8} />
+            <Ln x={76} y={68} w={34} color={accent} o={0.8} />
+        </Frame>
+    ),
     intraday: (
         <Frame>
             <line

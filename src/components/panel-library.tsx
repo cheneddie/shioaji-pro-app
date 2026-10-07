@@ -72,6 +72,7 @@ const PANEL_ICONS: Record<BlockType, LucideIcon> = {
     movers: TrendingUp,
     dock: Briefcase,
     chart: LineChart,
+    orderflow_kline: LineChart,
     intraday: ChartSpline,
     intradaywall: Grid2x2,
     depth: Layers,

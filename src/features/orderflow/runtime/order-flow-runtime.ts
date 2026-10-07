@@ -22,6 +22,7 @@ import { BookAggregator } from './book-aggregator';
 import {
     subscribeOrderFlowBooks,
     subscribeOrderFlowTicks,
+    type OrderFlowRawTick,
 } from './market-event-bridge';
 import { fetchOrderFlowHistory } from './order-flow-history';
 import { TickAggregator } from './tick-aggregator';
@@ -65,6 +66,7 @@ export class OrderFlowRuntime {
     private version = 0;
     private cachedSnapshot: OrderFlowRuntimeSnapshot | null = null;
     private listeners = new Set<Listener>();
+    private tickListeners = new Set<(tick: OrderFlowRawTick) => void>();
     private notifyTimer: ReturnType<typeof setTimeout> | null = null;
 
     private tickAggregator = new TickAggregator();
@@ -118,6 +120,14 @@ export class OrderFlowRuntime {
         this.listeners.add(listener);
         return () => {
             this.listeners.delete(listener);
+        };
+    }
+
+    subscribeTicks(listener: (tick: OrderFlowRawTick) => void) {
+        if (this.disposed) return () => undefined;
+        this.tickListeners.add(listener);
+        return () => {
+            this.tickListeners.delete(listener);
         };
     }
 
@@ -238,8 +248,19 @@ export class OrderFlowRuntime {
             (tick) => {
                 // Every raw event changes runtime health counters/time even
                 // when it is simtrade or zero-volume and therefore excluded
-                // from executed-flow totals.
-                this.tickAggregator.ingest(tick);
+                // from executed-flow totals. Fan-out happens only after the
+                // runtime dedupe gate so presentation consumers cannot count
+                // reconnect replays twice.
+                const result = this.tickAggregator.ingest(tick);
+                if (!result.duplicate) {
+                    for (const listener of this.tickListeners) {
+                        try {
+                            listener(tick);
+                        } catch (error) {
+                            console.error('[orderflow] tick listener threw', error);
+                        }
+                    }
+                }
                 this.invalidate();
             },
             sourceCode,
@@ -298,6 +319,7 @@ export class OrderFlowRuntime {
         if (this.notifyTimer) clearTimeout(this.notifyTimer);
         this.notifyTimer = null;
         this.listeners.clear();
+        this.tickListeners.clear();
         registry.delete(this.registryId);
         this.invalidate(false);
     }
