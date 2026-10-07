@@ -108,6 +108,27 @@ describe('TickAggregator', () => {
         expect(agg.lastPrice).toBeNull();
     });
 
+    it('keeps the moving deque bounded without shift-based churn during long in-order feeds', () => {
+        const agg = new TickAggregator(300);
+        const clock = (offset: number) => {
+            const base = 10 * 3600 + offset;
+            const hour = Math.floor(base / 3600);
+            const minute = Math.floor((base % 3600) / 60);
+            const second = base % 60;
+            return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.000`;
+        };
+        for (let i = 0; i < 1400; i++) {
+            agg.ingest(raw(clock(i), {
+                volume: 1,
+                totalVolume: 100 + i,
+                price: 27110 + (i % 2),
+            }));
+        }
+        expect([...agg.daily.values()].reduce((sum, bucket) => sum + bucket.total, 0)).toBe(1400);
+        // Inclusive 300-second boundary => 301 one-second trades remain.
+        expect([...agg.moving.values()].reduce((sum, bucket) => sum + bucket.total, 0)).toBe(301);
+    });
+
     it('keeps real trades with invalid event time in session totals but not the moving window', () => {
         const agg = new TickAggregator();
         agg.ingest(raw('bad-time', { volume: 5, totalVolume: 105 }));

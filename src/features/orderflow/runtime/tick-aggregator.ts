@@ -70,6 +70,7 @@ export class TickAggregator {
 
     private watermarkMs: number | null = null;
     private movingTrades: MovingTrade[] = [];
+    private movingHead = 0;
     private recentKeys = new Map<string, true>();
     private readonly windowMs: number;
 
@@ -144,7 +145,7 @@ export class TickAggregator {
                 };
                 let index = this.movingTrades.length;
                 while (
-                    index > 0 &&
+                    index > this.movingHead &&
                     this.movingTrades[index - 1]!.eventTimeMs > eventTimeMs
                 ) {
                     index -= 1;
@@ -161,16 +162,26 @@ export class TickAggregator {
         if (this.watermarkMs === null) return;
         const cutoff = this.watermarkMs - this.windowMs;
         while (
-            this.movingTrades.length > 0 &&
-            this.movingTrades[0]!.eventTimeMs < cutoff
+            this.movingHead < this.movingTrades.length &&
+            this.movingTrades[this.movingHead]!.eventTimeMs < cutoff
         ) {
-            const expired = this.movingTrades.shift()!;
+            const expired = this.movingTrades[this.movingHead]!;
+            this.movingHead += 1;
             subtractBucket(
                 this.moving,
                 expired.price,
                 expired.side,
                 expired.volume,
             );
+        }
+        // Avoid Array.shift() on every expired trade. Compact occasionally
+        // so steady high-rate feeds stay amortized O(1) for in-order traffic.
+        if (
+            this.movingHead > 1024 &&
+            this.movingHead * 2 > this.movingTrades.length
+        ) {
+            this.movingTrades = this.movingTrades.slice(this.movingHead);
+            this.movingHead = 0;
         }
     }
 }

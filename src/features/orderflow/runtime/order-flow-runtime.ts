@@ -230,8 +230,11 @@ export class OrderFlowRuntime {
         this.stopTick = subscribeOrderFlowTicks(
             this.identity.symbol,
             (tick) => {
-                const result = this.tickAggregator.ingest(tick);
-                if (result.changed || result.duplicate) this.invalidate();
+                // Every raw event changes runtime health counters/time even
+                // when it is simtrade or zero-volume and therefore excluded
+                // from executed-flow totals.
+                this.tickAggregator.ingest(tick);
+                this.invalidate();
             },
         );
         this.stopBook = subscribeOrderFlowBooks(

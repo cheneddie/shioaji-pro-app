@@ -209,6 +209,35 @@ describe('OrderFlowRuntime aggregation and health', () => {
         release();
     });
 
+    it('invalidates cached health for simtrade and zero-volume raw ticks without adding executed volume', async () => {
+        const { getOrderFlowRuntime } = await import('./order-flow-runtime');
+        const runtime = getOrderFlowRuntime(contract, 'all');
+        const release = runtime.retain();
+
+        mocks.tickListener!(tick('10:00:00.000', { volume: 2, totalVolume: 102 }));
+        const before = runtime.getSnapshot();
+        expect(before.health.rawTickCount).toBe(1);
+        expect(before.health.tradeTickCount).toBe(1);
+
+        mocks.tickListener!(tick('10:00:01.000', {
+            simtrade: true,
+            volume: 9,
+            totalVolume: 102,
+        }));
+        mocks.tickListener!(tick('10:00:02.000', {
+            simtrade: false,
+            volume: 0,
+            totalVolume: 102,
+        }));
+
+        const after = runtime.getSnapshot();
+        expect(after).not.toBe(before);
+        expect(after.health.rawTickCount).toBe(3);
+        expect(after.health.tradeTickCount).toBe(1);
+        expect(after.levels.find((row) => row.price === 27110)?.dailyTotal).toBe(2);
+        release();
+    });
+
     it('does not double-count an exact replay after a reconnect status cycle', async () => {
         const { getOrderFlowRuntime } = await import('./order-flow-runtime');
         const runtime = getOrderFlowRuntime(contract, 'all');
