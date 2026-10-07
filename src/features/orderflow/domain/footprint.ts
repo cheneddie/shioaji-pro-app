@@ -331,20 +331,24 @@ export class FootprintAggregator {
                 ratio,
                 minDelta,
             );
-            level.buyImbalance = passesImbalance(
-                level.buyVolume,
-                lower?.sellVolume ?? 0,
-                level.buyVolume - (lower?.sellVolume ?? 0),
-                ratio,
-                minDelta,
-            );
-            level.sellImbalance = passesImbalance(
-                level.sellVolume,
-                higher?.buyVolume ?? 0,
-                level.sellVolume - (higher?.buyVolume ?? 0),
-                ratio,
-                minDelta,
-            );
+            level.buyImbalance = lower
+                ? passesImbalance(
+                      level.buyVolume,
+                      lower.sellVolume,
+                      level.buyVolume - lower.sellVolume,
+                      ratio,
+                      minDelta,
+                  )
+                : false;
+            level.sellImbalance = higher
+                ? passesImbalance(
+                      level.sellVolume,
+                      higher.buyVolume,
+                      level.sellVolume - higher.buyVolume,
+                      ratio,
+                      minDelta,
+                  )
+                : false;
         }
         return levels;
     }

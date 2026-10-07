@@ -123,6 +123,22 @@ describe('FootprintAggregator', () => {
         expect(p102.sellHorizontalImbalance).toBe(true);
     });
 
+    it('does not invent diagonal imbalance when the adjacent comparison level is absent', () => {
+        const agg = new FootprintAggregator(contract, {
+            ...settings,
+            imbalanceRatio: 3,
+            minDelta: 2,
+        });
+        agg.ingestMany([
+            trade(1, 100, 10, 'buy'),
+            trade(2, 100, 1, 'sell'),
+        ]);
+        const level = agg.snapshot()[0]!.levels[0]!;
+        expect(level.buyHorizontalImbalance).toBe(true);
+        expect(level.buyImbalance).toBe(false);
+        expect(level.sellImbalance).toBe(false);
+    });
+
     it('keeps neutral volume separate from active buy/sell delta', () => {
         const agg = new FootprintAggregator(contract, settings);
         agg.ingestMany([
