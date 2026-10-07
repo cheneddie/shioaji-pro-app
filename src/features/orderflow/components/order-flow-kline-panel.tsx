@@ -9,7 +9,7 @@ import {
     type ISeriesApi,
     type UTCTimestamp,
 } from 'lightweight-charts';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AsyncStatus } from '../../../components/async-status';
 import { RefreshButton } from '../../../components/refresh-button';
 import { fetchChartHistory, nextChartHistoryRevision } from '../../../lib/chart-history';
@@ -84,25 +84,12 @@ export function OrderFlowKlinePanel({
     const tf = TIMEFRAMES[tfIndex] ?? TIMEFRAMES[1];
     const loadKey = `${contract.code}|${contract.target_code ?? ''}|${tf.minutes}|${dayOnly}`;
     const runtimeSession = dayOnly ? 'day' : 'all';
-    const runtime = useMemo(
-        () => getOrderFlowRuntime(contract, runtimeSession),
-        [
-            contract.region,
-            contract.security_type,
-            contract.exchange,
-            contract.code,
-            contract.target_code,
-            runtimeSession,
-        ],
-    );
 
     const themeSettings = useThemeSettings();
     const colors = getChartColors(themeSettings);
     const colorsRef = useRef(colors);
     colorsRef.current = colors;
     const themeKey = themeKeyOf(themeSettings);
-
-    useEffect(() => runtime.retain(), [runtime]);
 
     const writeBars = (bars: Candle[]) => {
         const colorsNow = colorsRef.current;
@@ -166,6 +153,12 @@ export function OrderFlowKlinePanel({
     };
 
     useEffect(() => {
+        // Resolve inside the effect rather than memoizing a runtime object:
+        // React StrictMode runs setup -> cleanup -> setup once in development.
+        // The first cleanup may release the last consumer and dispose/delete
+        // that runtime, so the second setup must ask the registry again.
+        const runtime = getOrderFlowRuntime(contract, runtimeSession);
+        const release = runtime.retain();
         const off = runtime.subscribeTicks((tick) => {
             if (loadedKeyRef.current !== loadKey) {
                 // History/live reconciliation is intentionally conservative:
@@ -181,8 +174,21 @@ export function OrderFlowKlinePanel({
             }
             applyTick(tick);
         });
-        return off;
-    }, [runtime, loadKey, tf.minutes, contract.security_type, dayOnly]);
+        return () => {
+            off();
+            release();
+        };
+    }, [
+        contract.region,
+        contract.security_type,
+        contract.exchange,
+        contract.code,
+        contract.target_code,
+        runtimeSession,
+        loadKey,
+        tf.minutes,
+        dayOnly,
+    ]);
 
     useEffect(() => {
         const host = hostRef.current;

@@ -55,5 +55,6 @@ describe('Order Flow extension native-panel baseline', () => {
         expect(source).not.toContain('IndicatorDialog');
         expect(source).toContain("from 'lightweight-charts'");
         expect(source).toContain('getOrderFlowRuntime');
+        expect(source).toContain('React StrictMode runs setup -> cleanup -> setup');
     });
 });

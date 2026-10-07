@@ -477,8 +477,11 @@ function indexBlockMessage(type: BlockType): string | null {
     if (type === 'depth' || type === 'depthmap') {
         return '指數 Quote 行情不含五檔委託資料';
     }
-    if (type === 'tape' || type === 'volprofile' || type === 'orderflow_kline') {
-        return '指數沒有即時 Tick 串流，此 Order Flow 面板不支援';
+    if (type === 'tape' || type === 'volprofile') {
+        return '指數沒有即時 Tick 串流，此面板不支援盤中更新';
+    }
+    if (type === 'orderflow_kline') {
+        return '指數沒有逐筆 Tick 串流，Order Flow K 線不支援';
     }
     if (type === 'flash' || type === 'grid' || type === 'oddspread') {
         return '指數商品不可下單';
