@@ -259,6 +259,7 @@ function BlockBody({
         case 'orderflow_kline':
             return contract ? (
                 <OrderFlowKlinePanel
+                    panelId={block.id}
                     contract={contract}
                     sessionMode={block.chartSession}
                     onSessionModeChange={(chartSession) =>

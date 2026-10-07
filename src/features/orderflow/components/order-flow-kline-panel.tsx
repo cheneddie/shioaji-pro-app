@@ -24,6 +24,11 @@ import type { ContractInfo } from '../../../lib/types/contract';
 import type { Candle } from '../../../lib/types/market';
 import { dateStrOffset } from '../../../lib/utils/kbars';
 import {
+    DEFAULT_BUBBLE_SETTINGS,
+    normalizeBubbleSettings,
+    type BubbleSettings,
+} from '../domain/bubble';
+import {
     applyOrderFlowTrade,
     orderFlowHistoryBars,
     orderFlowHistoryCutoff,
@@ -32,6 +37,7 @@ import {
 import { getOrderFlowRuntime } from '../runtime/order-flow-runtime';
 import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 import type { OrderFlowKlineTrade } from '../domain/kline';
+import { OrderFlowBubbleIndicator } from './order-flow-bubble-indicator';
 import * as styles from './order-flow-kline-panel.css';
 
 const TIMEFRAMES = [
@@ -42,11 +48,50 @@ const TIMEFRAMES = [
     { label: '1D', minutes: 1440, days: 240 },
 ] as const;
 
+interface OrderFlowKlinePreferences {
+    bubble?: Partial<BubbleSettings>;
+}
+
+function klineStorageKey(panelId: string) {
+    return `sj-pro-orderflow-kline-${panelId}`;
+}
+
+function loadBubbleSettings(panelId: string): BubbleSettings {
+    if (typeof localStorage === 'undefined') {
+        return DEFAULT_BUBBLE_SETTINGS;
+    }
+    try {
+        const raw = localStorage.getItem(klineStorageKey(panelId));
+        if (!raw) return DEFAULT_BUBBLE_SETTINGS;
+        const parsed = JSON.parse(raw) as OrderFlowKlinePreferences;
+        return normalizeBubbleSettings(parsed.bubble);
+    } catch {
+        return DEFAULT_BUBBLE_SETTINGS;
+    }
+}
+
+function saveBubbleSettings(
+    panelId: string,
+    bubble: BubbleSettings,
+) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        localStorage.setItem(
+            klineStorageKey(panelId),
+            JSON.stringify({ bubble }),
+        );
+    } catch {
+        // Storage quota/private-mode failure must not break the chart.
+    }
+}
+
 export function OrderFlowKlinePanel({
+    panelId = 'orderflow-kline',
     contract,
     sessionMode: sessionModeProp,
     onSessionModeChange,
 }: {
+    panelId?: string;
     contract: ContractInfo;
     sessionMode?: ChartSessionMode;
     onSessionModeChange?: (mode: ChartSessionMode) => void;
@@ -65,6 +110,24 @@ export function OrderFlowKlinePanel({
     const [loading, setLoading] = useState(false);
     const [historyError, setHistoryError] = useState(false);
     const [empty, setEmpty] = useState(false);
+    const [chartReady, setChartReady] = useState(false);
+    const [indicatorOpen, setIndicatorOpen] = useState(false);
+    const [bubbleSettings, setBubbleSettings] = useState<BubbleSettings>(
+        () => loadBubbleSettings(panelId),
+    );
+
+    const patchBubble = (patch: Partial<BubbleSettings>) => {
+        setBubbleSettings((current) =>
+            normalizeBubbleSettings({
+                ...current,
+                ...patch,
+            }),
+        );
+    };
+
+    useEffect(() => {
+        saveBubbleSettings(panelId, bubbleSettings);
+    }, [panelId, bubbleSettings]);
 
     const parsedSession = parseChartSessionMode(sessionModeProp);
     const [localSession, setLocalSession] = useState<ChartSessionMode>(
@@ -230,6 +293,7 @@ export function OrderFlowKlinePanel({
         chartRef.current = chart;
         candleRef.current = candles;
         volumeRef.current = volume;
+        setChartReady(true);
         return () => {
             chart.remove();
             chartRef.current = null;
@@ -359,6 +423,21 @@ export function OrderFlowKlinePanel({
                         </button>
                     </>
                 )}
+                <button
+                    type='button'
+                    className={
+                        styles.button[
+                            indicatorOpen || bubbleSettings.enabled
+                                ? 'active'
+                                : 'normal'
+                        ]
+                    }
+                    onClick={() =>
+                        setIndicatorOpen((value) => !value)
+                    }
+                >
+                    指標
+                </button>
                 <span className={styles.badge}>ORDER FLOW</span>
                 <RefreshButton
                     label='更新歷史'
@@ -366,7 +445,186 @@ export function OrderFlowKlinePanel({
                     onClick={() => setHistoryRevision(nextChartHistoryRevision())}
                 />
             </div>
+
+            {indicatorOpen && (
+                <div className={styles.indicatorPanel}>
+                    <label className={styles.indicatorCheck}>
+                        <input
+                            type='checkbox'
+                            checked={bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    enabled: event.target.checked,
+                                })
+                            }
+                        />
+                        成交氣泡
+                    </label>
+                    <label className={styles.indicatorControl}>
+                        模式
+                        <select
+                            value={bubbleSettings.filterMode}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    filterMode:
+                                        event.target.value as BubbleSettings['filterMode'],
+                                })
+                            }
+                        >
+                            <option value='cumulative'>累積 Delta</option>
+                            <option value='single'>單筆成交</option>
+                            <option value='charge'>N 秒同向</option>
+                        </select>
+                    </label>
+                    <label className={styles.indicatorControl}>
+                        方向
+                        <select
+                            value={bubbleSettings.direction}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    direction:
+                                        event.target.value as BubbleSettings['direction'],
+                                })
+                            }
+                        >
+                            <option value='all'>全部</option>
+                            <option value='buy'>買</option>
+                            <option value='sell'>賣</option>
+                        </select>
+                    </label>
+                    <label className={styles.indicatorControl}>
+                        最小量
+                        <input
+                            type='number'
+                            min={1}
+                            value={bubbleSettings.minimumVolume}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    minimumVolume:
+                                        Number(event.target.value),
+                                })
+                            }
+                        />
+                    </label>
+                    <label className={styles.indicatorControl}>
+                        最大量
+                        <input
+                            type='number'
+                            min={0}
+                            value={bubbleSettings.maximumVolume}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    maximumVolume:
+                                        Number(event.target.value),
+                                })
+                            }
+                        />
+                    </label>
+                    <label className={styles.indicatorControl}>
+                        最小半徑
+                        <input
+                            type='number'
+                            min={0.5}
+                            step={0.5}
+                            value={bubbleSettings.minimumRadius}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    minimumRadius:
+                                        Number(event.target.value),
+                                })
+                            }
+                        />
+                    </label>
+                    <label className={styles.indicatorControl}>
+                        透明度 %
+                        <input
+                            type='number'
+                            min={5}
+                            max={100}
+                            value={bubbleSettings.opacity}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    opacity:
+                                        Number(event.target.value),
+                                })
+                            }
+                        />
+                    </label>
+                    {bubbleSettings.filterMode === 'charge' && (
+                        <label className={styles.indicatorControl}>
+                            N 秒
+                            <input
+                                type='number'
+                                min={1}
+                                max={3600}
+                                value={
+                                    bubbleSettings.chargeWindowSeconds
+                                }
+                                disabled={!bubbleSettings.enabled}
+                                onChange={(event) =>
+                                    patchBubble({
+                                        chargeWindowSeconds:
+                                            Number(event.target.value),
+                                    })
+                                }
+                            />
+                        </label>
+                    )}
+                    <label className={styles.indicatorControl}>
+                        比例基準
+                        <select
+                            value={bubbleSettings.scaleMode}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    scaleMode:
+                                        event.target.value as BubbleSettings['scaleMode'],
+                                })
+                            }
+                        >
+                            <option value='visible'>可視範圍</option>
+                            <option value='bar'>單根 K</option>
+                        </select>
+                    </label>
+                    <label className={styles.indicatorControl}>
+                        放大 %
+                        <input
+                            type='number'
+                            min={0.01}
+                            step='any'
+                            value={bubbleSettings.scalePercent}
+                            disabled={!bubbleSettings.enabled}
+                            onChange={(event) =>
+                                patchBubble({
+                                    scalePercent:
+                                        Number(event.target.value),
+                                })
+                            }
+                        />
+                    </label>
+                </div>
+            )}
             <div ref={hostRef} className={styles.host}>
+                {chartReady && bubbleSettings.enabled && (
+                    <OrderFlowBubbleIndicator
+                        contract={contract}
+                        timeframeMinutes={tf.minutes}
+                        dayOnly={dayOnly}
+                        runtimeSession={runtimeSession}
+                        historyRevision={historyRevision}
+                        settings={bubbleSettings}
+                        hostRef={hostRef}
+                        chartRef={chartRef}
+                        candleRef={candleRef}
+                        colors={colors}
+                    />
+                )}
                 {(loading || empty) && (
                     <div className={styles.status}>
                         <AsyncStatus

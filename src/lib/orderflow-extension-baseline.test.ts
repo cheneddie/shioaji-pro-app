@@ -64,6 +64,25 @@ describe('Order Flow extension native-panel baseline', () => {
         expect(source).toMatch(/runtime\s*\.\s*loadHistory\s*\(/);
     });
 
+    it('keeps Development 5 Bubble inside Order Flow K-line and outside native indicators', () => {
+        const kline = readFileSync(
+            new URL('../features/orderflow/components/order-flow-kline-panel.tsx', import.meta.url),
+            'utf8',
+        );
+        const bubble = readFileSync(
+            new URL('../features/orderflow/components/order-flow-bubble-indicator.tsx', import.meta.url),
+            'utf8',
+        );
+        expect(kline).toContain('OrderFlowBubbleIndicator');
+        expect(kline).not.toContain("from '../../../lib/indicator-defs'");
+        expect(bubble).toContain('getOrderFlowRuntime');
+        expect(bubble).toContain('runtime.subscribeTicks');
+        expect(bubble).toMatch(/runtime\s*\.\s*loadHistory\s*\(/);
+        expect(bubble).not.toContain("from '../../../lib/stream'");
+        expect(bubble).not.toContain('retainQuote');
+        expect('flowladder' in BLOCK_META).toBe(false);
+    });
+
     it('keeps the Order Flow K-line isolated from native execution, indicator and drawing implementations', () => {
         const source = readFileSync(
             new URL('../features/orderflow/components/order-flow-kline-panel.tsx', import.meta.url),
