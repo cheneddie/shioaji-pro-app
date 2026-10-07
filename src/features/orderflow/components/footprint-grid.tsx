@@ -18,6 +18,29 @@ export function resolveFootprintLod(
     return 'summary';
 }
 
+export function shouldRenderFootprintLevel(
+    level: Pick<FootprintLevel, 'totalVolume'>,
+    minimumVolume: number,
+): boolean {
+    const threshold = Number.isFinite(minimumVolume)
+        ? Math.max(1, minimumVolume)
+        : 1;
+    return level.totalVolume >= threshold;
+}
+
+export function footprintHeatAlpha(
+    intensity: number,
+    opacityPercent: number,
+): number {
+    const normalizedIntensity = Number.isFinite(intensity)
+        ? Math.max(0, Math.min(1, intensity))
+        : 0;
+    const normalizedOpacity = Number.isFinite(opacityPercent)
+        ? Math.max(0, Math.min(100, opacityPercent)) / 100
+        : 1;
+    return (0.08 + normalizedIntensity * 0.28) * normalizedOpacity;
+}
+
 function alphaFill(
     ctx: CanvasRenderingContext2D,
     color: string,
@@ -89,6 +112,8 @@ export function FootprintGrid({
     colors,
     mode,
     visibleBars,
+    minimumVolume,
+    opacity,
     showPoc,
     showDeltaPoc,
     showImbalance,
@@ -98,6 +123,8 @@ export function FootprintGrid({
     colors: ChartColors;
     mode: FootprintDisplayMode;
     visibleBars: number;
+    minimumVolume: number;
+    opacity: number;
     showPoc: boolean;
     showDeltaPoc: boolean;
     showImbalance: boolean;
@@ -183,6 +210,14 @@ export function FootprintGrid({
                     for (const level of bar.levels) {
                         const index = priceIndex.get(level.price);
                         if (index === undefined) continue;
+                        if (
+                            !shouldRenderFootprintLevel(
+                                level,
+                                minimumVolume,
+                            )
+                        ) {
+                            continue;
+                        }
                         const y =
                             plotBottom - (index + 1) * rowHeight;
                         const intensity =
@@ -190,7 +225,7 @@ export function FootprintGrid({
                         const restore = alphaFill(
                             ctx,
                             levelColor(level, colors),
-                            0.08 + intensity * 0.28,
+                            footprintHeatAlpha(intensity, opacity),
                         );
                         ctx.fillRect(
                             x + 0.5,
@@ -354,6 +389,8 @@ export function FootprintGrid({
         colors,
         mode,
         visibleBars,
+        minimumVolume,
+        opacity,
         showPoc,
         showDeltaPoc,
         showImbalance,

@@ -66,6 +66,11 @@ Automatic LOD:
 2. `heatmap`: colored cells, POC / Delta-POC / imbalance markers, no text.
 3. `summary`: candle summary when bars or price rows are too dense.
 
+Presentation controls also include:
+
+- `minimumVolume` (default 1): a render threshold only. It does not remove trades from aggregation and therefore does not rewrite OHLC, bar volume, POC, Delta POC, or reconciliation totals.
+- `opacity` (default 88%, range 5–100): scales only the Footprint heatmap fill alpha; it does not change the underlying volume or imbalance calculations.
+
 ## Persistence
 
 Panel-local display preferences use:

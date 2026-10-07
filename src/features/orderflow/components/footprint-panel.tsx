@@ -51,6 +51,8 @@ interface FootprintPreferences {
     tickCompression: number;
     imbalanceRatio: number;
     minDelta: number;
+    minimumVolume: number;
+    opacity: number;
     showPoc: boolean;
     showDeltaPoc: boolean;
     showImbalance: boolean;
@@ -63,6 +65,8 @@ const DEFAULT_PREFS: FootprintPreferences = {
     tickCompression: 1,
     imbalanceRatio: 3,
     minDelta: 1,
+    minimumVolume: 1,
+    opacity: 88,
     showPoc: true,
     showDeltaPoc: true,
     showImbalance: true,
@@ -105,6 +109,20 @@ function loadPreferences(panelId: string): FootprintPreferences {
                 Number(value.minDelta) >= 0
                     ? Number(value.minDelta)
                     : DEFAULT_PREFS.minDelta,
+            minimumVolume:
+                Number.isFinite(value.minimumVolume) &&
+                Number(value.minimumVolume) >= 1
+                    ? Math.min(
+                          1_000_000,
+                          Math.floor(Number(value.minimumVolume)),
+                      )
+                    : DEFAULT_PREFS.minimumVolume,
+            opacity:
+                Number.isFinite(value.opacity) &&
+                Number(value.opacity) >= 5 &&
+                Number(value.opacity) <= 100
+                    ? Number(value.opacity)
+                    : DEFAULT_PREFS.opacity,
             showPoc:
                 typeof value.showPoc === 'boolean'
                     ? value.showPoc
@@ -169,6 +187,10 @@ export function FootprintPanel({
         initialPrefs.imbalanceRatio,
     );
     const [minDelta, setMinDelta] = useState(initialPrefs.minDelta);
+    const [minimumVolume, setMinimumVolume] = useState(
+        initialPrefs.minimumVolume,
+    );
+    const [opacity, setOpacity] = useState(initialPrefs.opacity);
     const [showPoc, setShowPoc] = useState(initialPrefs.showPoc);
     const [showDeltaPoc, setShowDeltaPoc] = useState(
         initialPrefs.showDeltaPoc,
@@ -235,6 +257,8 @@ export function FootprintPanel({
             tickCompression,
             imbalanceRatio,
             minDelta,
+            minimumVolume,
+            opacity,
             showPoc,
             showDeltaPoc,
             showImbalance,
@@ -248,6 +272,8 @@ export function FootprintPanel({
         tickCompression,
         imbalanceRatio,
         minDelta,
+        minimumVolume,
+        opacity,
         showPoc,
         showDeltaPoc,
         showImbalance,
@@ -517,6 +543,50 @@ export function FootprintPanel({
                         )
                     }
                 />
+                <input
+                    className={styles.input}
+                    aria-label='Footprint minimum volume'
+                    title='最低成交量'
+                    type='number'
+                    min={1}
+                    max={1_000_000}
+                    step={1}
+                    value={minimumVolume}
+                    onChange={(event) =>
+                        setMinimumVolume(
+                            Math.min(
+                                1_000_000,
+                                Math.max(
+                                    1,
+                                    Math.floor(
+                                        Number(event.target.value) || 1,
+                                    ),
+                                ),
+                            ),
+                        )
+                    }
+                />
+                <input
+                    className={styles.input}
+                    aria-label='Footprint opacity'
+                    title='Profile 透明度 (%)'
+                    type='number'
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={opacity}
+                    onChange={(event) =>
+                        setOpacity(
+                            Math.min(
+                                100,
+                                Math.max(
+                                    5,
+                                    Number(event.target.value) || 5,
+                                ),
+                            ),
+                        )
+                    }
+                />
                 <button
                     type='button'
                     className={
@@ -583,6 +653,8 @@ export function FootprintPanel({
                     colors={colors}
                     mode={mode}
                     visibleBars={visibleBars}
+                    minimumVolume={minimumVolume}
+                    opacity={opacity}
                     showPoc={showPoc}
                     showDeltaPoc={showDeltaPoc}
                     showImbalance={showImbalance}
