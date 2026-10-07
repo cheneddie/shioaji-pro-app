@@ -51,12 +51,13 @@ No second EventSource is created and multiple Order Flow K-line panels sharing t
 
 ## Live / history handoff
 
-While a REST history request is in flight, raw ticks are buffered locally by the panel.
+While a REST history request is in flight, the panel projects raw ticks immediately into compact live-trade records and buffers those records locally. The history request is timeout-bounded, so the handoff does not use a lossy fixed-size tick cap.
 
 After history arrives:
 
-- buffered ticks whose bucket is at or before the returned history tail are discarded to avoid double counting a partial REST tail;
-- buffered ticks in newer buckets are applied;
+- the last returned 1-minute close-label defines REST's completed event-time coverage;
+- buffered trades earlier than that coverage are discarded as already represented by history;
+- buffered trades at/after that boundary are applied, even when they belong to the same larger 5m/60m aggregate tail candle;
 - subsequent deduped raw runtime ticks update the current/new candle directly.
 
 If history fails, buffered raw ticks become the live chart seed.

@@ -26,14 +26,13 @@ import { dateStrOffset } from '../../../lib/utils/kbars';
 import {
     applyOrderFlowTrade,
     orderFlowHistoryBars,
+    orderFlowHistoryCutoff,
     projectOrderFlowTick,
 } from '../domain/kline';
 import { getOrderFlowRuntime } from '../runtime/order-flow-runtime';
 import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
+import type { OrderFlowKlineTrade } from '../domain/kline';
 import * as styles from './order-flow-kline-panel.css';
-
-const MAX_PENDING_TICKS = 50_000;
-const PENDING_TRIM_BATCH = 10_000;
 
 const TIMEFRAMES = [
     { label: '1m', minutes: 1, days: 3 },
@@ -59,7 +58,7 @@ export function OrderFlowKlinePanel({
     const barsRef = useRef<Candle[]>([]);
     const lastBarRef = useRef<Candle | null>(null);
     const loadedKeyRef = useRef('');
-    const pendingTicksRef = useRef<OrderFlowRawTick[]>([]);
+    const pendingTradesRef = useRef<OrderFlowKlineTrade[]>([]);
 
     const [tfIndex, setTfIndex] = useState(1);
     const [historyRevision, setHistoryRevision] = useState(0);
@@ -113,14 +112,7 @@ export function OrderFlowKlinePanel({
         lastBarRef.current = bars.at(-1) ?? null;
     };
 
-    const applyTick = (tick: OrderFlowRawTick) => {
-        const trade = projectOrderFlowTick(
-            tick,
-            tf.minutes,
-            contract.security_type,
-            dayOnly,
-        );
-        if (!trade) return;
+    const applyTrade = (trade: OrderFlowKlineTrade) => {
         const next = applyOrderFlowTrade(lastBarRef.current, trade);
         if (!next) return;
 
@@ -159,20 +151,22 @@ export function OrderFlowKlinePanel({
         // that runtime, so the second setup must ask the registry again.
         const runtime = getOrderFlowRuntime(contract, runtimeSession);
         const release = runtime.retain();
-        const off = runtime.subscribeTicks((tick) => {
+        const off = runtime.subscribeTicks((tick: OrderFlowRawTick) => {
+            const trade = projectOrderFlowTick(
+                tick,
+                tf.minutes,
+                contract.security_type,
+                dayOnly,
+            );
+            if (!trade) return;
             if (loadedKeyRef.current !== loadKey) {
-                // History/live reconciliation is intentionally conservative:
-                // buffer while the REST snapshot is in flight, then only
-                // append buckets newer than the returned history tail.
-                if (pendingTicksRef.current.length >= MAX_PENDING_TICKS) {
-                    // Trim in a batch instead of shifting one element on
-                    // every high-rate tick once the cap is reached.
-                    pendingTicksRef.current.splice(0, PENDING_TRIM_BATCH);
-                }
-                pendingTicksRef.current.push(tick);
+                // Buffer the compact projected trade rather than the raw SSE
+                // payload. fetchChartHistory is timeout-bounded, so this keeps
+                // every handoff trade without a lossy fixed-size cap.
+                pendingTradesRef.current.push(trade);
                 return;
             }
-            applyTick(tick);
+            applyTrade(trade);
         });
         return () => {
             off();
@@ -274,7 +268,7 @@ export function OrderFlowKlinePanel({
     useEffect(() => {
         let cancelled = false;
         loadedKeyRef.current = '';
-        pendingTicksRef.current = [];
+        pendingTradesRef.current = [];
         writeBars([]);
         setLoading(true);
         setHistoryError(false);
@@ -295,22 +289,22 @@ export function OrderFlowKlinePanel({
                     dayOnly,
                 );
                 writeBars(bars);
-                const historyTail = bars.at(-1)?.time ?? -Infinity;
+                // K-bar datetimes are close-label-right minute coverage.
+                // A raw trade at/after the last returned 1m label belongs to
+                // data not covered by that completed minute, even when its
+                // larger 5m/60m candle bucket equals the aggregate tail.
+                const historyCutoff = orderFlowHistoryCutoff(
+                    source,
+                    contract.security_type,
+                    dayOnly,
+                );
                 loadedKeyRef.current = loadKey;
 
-                const pending = pendingTicksRef.current;
-                pendingTicksRef.current = [];
-                for (const tick of pending) {
-                    const projected = projectOrderFlowTick(
-                        tick,
-                        tf.minutes,
-                        contract.security_type,
-                        dayOnly,
-                    );
-                    // Avoid double-counting a partial REST tail. Raw takeover
-                    // begins strictly after the history tail for buffered data.
-                    if (!projected || projected.time <= historyTail) continue;
-                    applyTick(tick);
+                const pending = pendingTradesRef.current;
+                pendingTradesRef.current = [];
+                for (const trade of pending) {
+                    if (trade.eventTime < historyCutoff) continue;
+                    applyTrade(trade);
                 }
                 setEmpty(bars.length === 0 && lastBarRef.current === null);
                 chartRef.current?.timeScale().fitContent();
@@ -318,9 +312,9 @@ export function OrderFlowKlinePanel({
             .catch(() => {
                 if (cancelled) return;
                 loadedKeyRef.current = loadKey;
-                const pending = pendingTicksRef.current;
-                pendingTicksRef.current = [];
-                for (const tick of pending) applyTick(tick);
+                const pending = pendingTradesRef.current;
+                pendingTradesRef.current = [];
+                for (const trade of pending) applyTrade(trade);
                 setHistoryError(true);
                 setEmpty(lastBarRef.current === null);
             })

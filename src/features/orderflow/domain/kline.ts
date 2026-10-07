@@ -10,9 +10,29 @@ import { aggregate, kbarsToCandles, wallClockToUtc } from '../../../lib/utils/kb
 import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 
 export interface OrderFlowKlineTrade {
+    /** Exchange event time in wall-clock encoded UTC seconds. */
+    eventTime: number;
+    /** close-label-right candle bucket. */
     time: number;
     price: number;
     volume: number;
+}
+
+function orderFlowHistoryRaw(
+    source: KBars,
+    securityType: SecurityType,
+    dayOnly: boolean,
+): Candle[] {
+    const raw = kbarsToCandles(source);
+    return dayOnly ? filterDaySession(securityType, raw) : raw;
+}
+
+export function orderFlowHistoryCutoff(
+    source: KBars,
+    securityType: SecurityType,
+    dayOnly: boolean,
+): number {
+    return orderFlowHistoryRaw(source, securityType, dayOnly).at(-1)?.time ?? -Infinity;
 }
 
 export function orderFlowHistoryBars(
@@ -21,9 +41,8 @@ export function orderFlowHistoryBars(
     securityType: SecurityType,
     dayOnly: boolean,
 ): Candle[] {
-    const raw = kbarsToCandles(source);
     return aggregate(
-        dayOnly ? filterDaySession(securityType, raw) : raw,
+        orderFlowHistoryRaw(source, securityType, dayOnly),
         minutes,
     );
 }
@@ -52,7 +71,7 @@ export function projectOrderFlowTick(
             ? Math.floor(eventTime / 86400) * 86400
             : Math.floor(eventTime / bucketSeconds) * bucketSeconds +
               bucketSeconds;
-    return { time, price: tick.price, volume: tick.volume };
+    return { eventTime, time, price: tick.price, volume: tick.volume };
 }
 
 export function applyOrderFlowTrade(

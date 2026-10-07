@@ -4,6 +4,7 @@ import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 import {
     applyOrderFlowTrade,
     orderFlowHistoryBars,
+    orderFlowHistoryCutoff,
     projectOrderFlowTick,
 } from './kline';
 
@@ -61,10 +62,17 @@ describe('Order Flow K-line projection', () => {
         const day = orderFlowHistoryBars(history, 5, 'FUT', true);
         expect(day).toHaveLength(1);
         expect(day[0]).toMatchObject({ open: 100, close: 102, volume: 5 });
+        expect(orderFlowHistoryCutoff(history, 'FUT', true)).toBe(
+            day[0]!.time - 180,
+        );
+        expect(orderFlowHistoryCutoff(history, 'FUT', false)).toBeGreaterThan(
+            orderFlowHistoryCutoff(history, 'FUT', true),
+        );
     });
 
     it('projects real raw ticks into close-label-right buckets and rejects non-trades', () => {
         expect(projectOrderFlowTick(tick('10:00:00.000'), 5, 'FUT', false)).toMatchObject({
+            eventTime: expect.any(Number),
             price: 101,
             volume: 2,
         });
@@ -79,16 +87,16 @@ describe('Order Flow K-line projection', () => {
     });
 
     it('appends new buckets, updates the current bucket and ignores older buckets', () => {
-        const first = applyOrderFlowTrade(null, { time: 100, price: 10, volume: 2 })!;
+        const first = applyOrderFlowTrade(null, { eventTime: 90, time: 100, price: 10, volume: 2 })!;
         expect(first).toEqual({
             append: true,
             bar: { time: 100, open: 10, high: 10, low: 10, close: 10, volume: 2 },
         });
-        const same = applyOrderFlowTrade(first.bar, { time: 100, price: 12, volume: 3 })!;
+        const same = applyOrderFlowTrade(first.bar, { eventTime: 95, time: 100, price: 12, volume: 3 })!;
         expect(same).toEqual({
             append: false,
             bar: { time: 100, open: 10, high: 12, low: 10, close: 12, volume: 5 },
         });
-        expect(applyOrderFlowTrade(same.bar, { time: 99, price: 9, volume: 1 })).toBeNull();
+        expect(applyOrderFlowTrade(same.bar, { eventTime: 80, time: 99, price: 9, volume: 1 })).toBeNull();
     });
 });
