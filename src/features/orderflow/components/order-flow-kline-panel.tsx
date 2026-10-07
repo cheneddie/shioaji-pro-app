@@ -463,6 +463,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         模式
                         <select
+                            className={styles.indicatorField}
                             value={bubbleSettings.filterMode}
                             disabled={!bubbleSettings.enabled}
                             onChange={(event) =>
@@ -480,6 +481,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         方向
                         <select
+                            className={styles.indicatorField}
                             value={bubbleSettings.direction}
                             disabled={!bubbleSettings.enabled}
                             onChange={(event) =>
@@ -497,6 +499,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         最小量
                         <input
+                            className={styles.indicatorField}
                             type='number'
                             min={1}
                             value={bubbleSettings.minimumVolume}
@@ -512,6 +515,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         最大量
                         <input
+                            className={styles.indicatorField}
                             type='number'
                             min={0}
                             value={bubbleSettings.maximumVolume}
@@ -527,6 +531,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         最小半徑
                         <input
+                            className={styles.indicatorField}
                             type='number'
                             min={0.5}
                             step={0.5}
@@ -543,6 +548,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         透明度 %
                         <input
+                            className={styles.indicatorField}
                             type='number'
                             min={5}
                             max={100}
@@ -579,6 +585,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         比例基準
                         <select
+                            className={styles.indicatorField}
                             value={bubbleSettings.scaleMode}
                             disabled={!bubbleSettings.enabled}
                             onChange={(event) =>
@@ -595,6 +602,7 @@ export function OrderFlowKlinePanel({
                     <label className={styles.indicatorControl}>
                         放大 %
                         <input
+                            className={styles.indicatorField}
                             type='number'
                             min={0.01}
                             step='any'

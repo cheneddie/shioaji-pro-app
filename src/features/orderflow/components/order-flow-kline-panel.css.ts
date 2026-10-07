@@ -71,19 +71,18 @@ export const indicatorControl = style({
     fontFamily: vars.font.mono,
     fontSize: '0.62rem',
     color: vars.color.mutedForeground,
-    selectors: {
-        '& select, & input': {
-            width: '100%',
-            minWidth: 0,
-            fontFamily: vars.font.mono,
-            fontSize: '0.65rem',
-            color: vars.color.foreground,
-            background: vars.color.background,
-            border: `1px solid ${vars.color.border}`,
-            borderRadius: vars.radius.sm,
-            padding: '2px 4px',
-        },
-    },
+});
+
+export const indicatorField = style({
+    width: '100%',
+    minWidth: 0,
+    fontFamily: vars.font.mono,
+    fontSize: '0.65rem',
+    color: vars.color.foreground,
+    background: vars.color.background,
+    border: `1px solid ${vars.color.border}`,
+    borderRadius: vars.radius.sm,
+    padding: '2px 4px',
 });
 
 export const host = style({
