@@ -1,7 +1,11 @@
 // src/features/orderflow/components/footprint-panel.test.tsx
 
-import { act, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    act,
+    create,
+    type ReactTestRenderer,
+} from 'react-test-renderer';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractInfo } from '../../../lib/types/contract';
 
 const runtime = vi.hoisted(() => {
@@ -10,23 +14,31 @@ const runtime = vi.hoisted(() => {
     const release = vi.fn();
     const offTick = vi.fn();
     const offHealth = vi.fn();
+    const retain = vi.fn(() => release);
+    const subscribeTicks = vi.fn(
+        (listener: (tick: unknown) => void) => {
+            tickListener = listener;
+            return offTick;
+        },
+    );
+    const subscribe = vi.fn((listener: () => void) => {
+        snapshotListener = listener;
+        return offHealth;
+    });
+    const getSnapshot = vi.fn(() => ({
+        health: { streamStatus: 'live' },
+    }));
+    const loadHistory = vi.fn();
+
     return {
         release,
         offTick,
         offHealth,
-        retain: vi.fn(() => release),
-        subscribeTicks: vi.fn((listener: (tick: unknown) => void) => {
-            tickListener = listener;
-            return offTick;
-        }),
-        subscribe: vi.fn((listener: () => void) => {
-            snapshotListener = listener;
-            return offHealth;
-        }),
-        getSnapshot: vi.fn(() => ({
-            health: { streamStatus: 'live' },
-        })),
-        loadHistory: vi.fn(),
+        retain,
+        subscribeTicks,
+        subscribe,
+        getSnapshot,
+        loadHistory,
         emitTick(tick: unknown) {
             tickListener?.(tick);
         },
@@ -39,11 +51,11 @@ const runtime = vi.hoisted(() => {
             release.mockClear();
             offTick.mockClear();
             offHealth.mockClear();
-            this.retain.mockClear();
-            this.subscribeTicks.mockClear();
-            this.subscribe.mockClear();
-            this.getSnapshot.mockClear();
-            this.loadHistory.mockReset();
+            retain.mockClear();
+            subscribeTicks.mockClear();
+            subscribe.mockClear();
+            getSnapshot.mockClear();
+            loadHistory.mockReset();
         },
     };
 });
@@ -110,6 +122,28 @@ const contract: ContractInfo = {
     underlying_kind: 'I',
 };
 
+async function mountPanel(panelId: string): Promise<ReactTestRenderer> {
+    let view!: ReactTestRenderer;
+    await act(async () => {
+        view = create(
+            <FootprintPanel
+                panelId={panelId}
+                contract={contract}
+                sessionMode='all'
+            />,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+    return view;
+}
+
+function gridProps(view: ReactTestRenderer) {
+    return view.root.findByProps({
+        'data-testid': 'footprint-grid',
+    }).props as Record<string, unknown>;
+}
+
 describe('FootprintPanel lifecycle', () => {
     beforeEach(() => {
         runtime.reset();
@@ -129,43 +163,20 @@ describe('FootprintPanel lifecycle', () => {
         });
     });
 
-    afterEach(() => {
-        vi.clearAllMocks();
-    });
-
     it('loads history through the shared runtime and renders footprint bars', async () => {
-        render(
-            <FootprintPanel
-                panelId='fp-1'
-                contract={contract}
-                sessionMode='all'
-            />,
-        );
-        await waitFor(() =>
-            expect(
-                screen.getByTestId('footprint-grid'),
-            ).toHaveAttribute('data-bars', '1'),
-        );
+        const view = await mountPanel('fp-1');
+        expect(gridProps(view)['data-bars']).toBe(1);
         expect(runtime.retain).toHaveBeenCalledTimes(1);
         expect(runtime.loadHistory).toHaveBeenCalledTimes(1);
         expect(runtime.subscribeTicks).toHaveBeenCalledTimes(1);
+        await act(async () => view.unmount());
     });
 
-    it('applies deduped live ticks without opening another runtime', async () => {
-        render(
-            <FootprintPanel
-                panelId='fp-2'
-                contract={contract}
-                sessionMode='all'
-            />,
-        );
-        await waitFor(() =>
-            expect(
-                screen.getByTestId('footprint-grid'),
-            ).toHaveAttribute('data-volume', '2'),
-        );
+    it('applies live ticks without opening another runtime', async () => {
+        const view = await mountPanel('fp-2');
+        expect(gridProps(view)['data-volume']).toBe(2);
 
-        act(() => {
+        await act(async () => {
             runtime.emitTick({
                 code: 'TXFR1',
                 date: '2026/10/08',
@@ -178,28 +189,18 @@ describe('FootprintPanel lifecycle', () => {
                 intradayOdd: false,
                 raw: {},
             });
+            await new Promise((resolve) => setTimeout(resolve, 40));
         });
 
-        await waitFor(() =>
-            expect(
-                screen.getByTestId('footprint-grid'),
-            ).toHaveAttribute('data-volume', '5'),
-        );
+        expect(gridProps(view)['data-volume']).toBe(5);
         expect(runtime.retain).toHaveBeenCalledTimes(1);
+        await act(async () => view.unmount());
     });
 
     it('releases the shared runtime on unmount', async () => {
-        const view = render(
-            <FootprintPanel
-                panelId='fp-3'
-                contract={contract}
-                sessionMode='all'
-            />,
-        );
-        await waitFor(() =>
-            expect(runtime.loadHistory).toHaveBeenCalled(),
-        );
-        view.unmount();
+        const view = await mountPanel('fp-3');
+        expect(runtime.loadHistory).toHaveBeenCalledTimes(1);
+        await act(async () => view.unmount());
         expect(runtime.offTick).toHaveBeenCalledTimes(1);
         expect(runtime.offHealth).toHaveBeenCalledTimes(1);
         expect(runtime.release).toHaveBeenCalledTimes(1);
