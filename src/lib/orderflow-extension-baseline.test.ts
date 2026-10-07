@@ -61,7 +61,7 @@ describe('Order Flow extension native-panel baseline', () => {
         expect(source).not.toContain('retainQuote');
         expect(source).toContain('getOrderFlowRuntime');
         expect(source).toContain('runtime.subscribeTicks');
-        expect(source).toContain('runtime.loadHistory');
+        expect(source).toMatch(/runtime\s*\.\s*loadHistory\s*\(/);
     });
 
     it('keeps the Order Flow K-line isolated from native execution, indicator and drawing implementations', () => {

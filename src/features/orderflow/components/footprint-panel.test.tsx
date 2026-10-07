@@ -8,6 +8,33 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractInfo } from '../../../lib/types/contract';
 
+const memoryStorage = new Map<string, string>();
+const localStorageStub: Storage = {
+    get length() {
+        return memoryStorage.size;
+    },
+    clear() {
+        memoryStorage.clear();
+    },
+    getItem(key: string) {
+        return memoryStorage.get(key) ?? null;
+    },
+    key(index: number) {
+        return [...memoryStorage.keys()][index] ?? null;
+    },
+    removeItem(key: string) {
+        memoryStorage.delete(key);
+    },
+    setItem(key: string, value: string) {
+        memoryStorage.set(key, String(value));
+    },
+};
+Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: localStorageStub,
+});
+
+
 const runtime = vi.hoisted(() => {
     let tickListener: ((tick: unknown) => void) | null = null;
     let snapshotListener: (() => void) | null = null;
