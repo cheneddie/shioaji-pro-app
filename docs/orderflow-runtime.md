@@ -96,7 +96,11 @@ Rolling window defaults to 300 seconds of **event time**:
 
 Out-of-order trades inside the current moving window are inserted by event time. Older-than-window arrivals still affect the session totals but not the current moving window.
 
+The moving queue uses a head index with periodic compaction rather than repeated `Array.shift()`, so the normal in-order expiry path avoids O(n) array movement under high tick rates.
+
 Exact recent tick replays are deduplicated with a bounded recent-event key set so reconnect replay cannot double-count an identical trade.
+
+Raw normalization from Development 1 treats blank/non-numeric trade or book prices as `null`, never price `0`; the runtime ignores non-finite/null trade prices for volume aggregation.
 
 ## Book semantics
 
