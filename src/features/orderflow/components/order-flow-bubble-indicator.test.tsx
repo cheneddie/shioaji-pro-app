@@ -93,10 +93,10 @@ async function completeVisibleDebounce() {
     await flush();
 }
 
-function viewComponent() {
+function viewComponent(minutes = 1) {
     return (
         <OrderFlowBubbleIndicator
-            contract={contract} timeframeMinutes={1} dayOnly={false}
+            contract={contract} timeframeMinutes={minutes} dayOnly={false}
             runtimeSession='all' historyRevision={0}
             settings={{ ...DEFAULT_BUBBLE_SETTINGS, enabled: true }}
             hostRef={dummyRef} chartRef={chartRef as never}
@@ -195,6 +195,71 @@ describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
         expect(mocks.query.mock.calls[1]![1]).toMatchObject({
             date: '2026-10-12', session: 'night',
         });
+        await act(async () => view.unmount());
+    });
+    it('never fetches or renders partial 1D bubble data', async () => {
+        runtime.bufferedTicks.mockReturnValueOnce({
+            ticks: [{
+                code: 'TXFR1', date: '2026/10/08', time: '09:00:02.000',
+                price: 101, volume: 5, totalVolume: 15, tickType: 2,
+                simtrade: false, intradayOdd: false, raw: {},
+            }], truncated: false,
+        });
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent(1440)); });
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(0);
+        await completeVisibleDebounce();
+        expect(mocks.query).not.toHaveBeenCalled();
+        expect(view.root.findByProps({ role: 'status' }).props.children)
+            .toContain('成交氣泡僅支援 60m 以下');
+        await act(async () => view.unmount());
+    });
+    it('shows quota block after the first selected trading date without hiding live flow', async () => {
+        mocks.query.mockImplementation(async (_contract, slice) => ({
+            slice, status: 'quota', percent: 80, checkedAt: Date.now(),
+            truncated: false, ticks: [],
+        }));
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
+        const notice = view.root.findByProps({ role: 'status' });
+        expect(notice.props.children).toContain('80.0%');
+        expect(notice.props['data-orderflow-tick-coverage']).toBe('quota');
+        await act(async () => {
+            runtime.emit({
+                code: 'TXFR1', date: '2026/10/08', time: '09:00:05.000',
+                price: 101, volume: 5, totalVolume: 15, tickType: 2,
+                simtrade: false, intradayOdd: false, raw: {},
+            });
+            await vi.advanceTimersByTimeAsync(55);
+        });
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(1);
+        await act(async () => view.unmount());
+    });
+    it('reports capped latest three dates and preserves completed partial date history', async () => {
+        mocks.visible = {
+            from: Date.UTC(2026, 9, 5, 8, 45) / 1000,
+            to: Date.UTC(2026, 9, 8, 17, 30) / 1000,
+        };
+        mocks.query.mockImplementation(async (_contract, slice) => ({
+            slice, status: slice.date === '2026-10-12' ? 'gap' : 'ready',
+            percent: 25, checkedAt: Date.now(), truncated: false,
+            ticks: slice.date === '2026-10-12' ? [] : [{
+                datetime: '2026-10-08 09:00:01.000',
+                eventTimeMs: Date.UTC(2026, 9, 8, 9, 0, 1),
+                price: 100, volume: 10, tickType: 1, side: 'buy',
+            }],
+        }));
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
+        const notice = view.root.findByProps({ role: 'status' });
+        // API gaps take precedence over range limits; completed date data
+        // must still render without being cleared by a later slice failure.
+        expect(notice.props.children).toContain('DATA GAP');
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count'])
+            .toBeGreaterThan(0);
+        expect(mocks.query.mock.calls.length).toBeGreaterThan(1);
         await act(async () => view.unmount());
     });
     it('presentation settings do not re-request history', async () => {

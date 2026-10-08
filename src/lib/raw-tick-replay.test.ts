@@ -57,6 +57,22 @@ describe('physical raw Tick cross-window replay', () => {
         owner = false;
         a.close(); b.close();
     });
+    it('streams more than one bounded chunk without duplicate or foreign aliases', async () => {
+        const ticks = Array.from({ length: 805 }, (_, i) =>
+            tick('TXFJ6', `15:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.000123`));
+        ticks.push(tick('TXFR1', '15:01:00.000123'));
+        const a = createRawTickReplayProtocol('test', () => true,
+            () => ({ ticks, truncated: false }));
+        const b = createRawTickReplayProtocol('test', () => false,
+            () => ({ ticks: [], truncated: false }));
+        const response = await b.request('TXFJ6',
+            Date.parse('2026-10-08T15:00:00Z'),
+            Date.parse('2026-10-08T15:15:00Z'));
+        expect(response.ticks).toHaveLength(805);
+        expect(response.ticks.every(t => t.code === 'TXFJ6')).toBe(true);
+        expect(response.truncated).toBe(false);
+        a.close(); b.close();
+    });
     it('times out safely when no owner exists', async () => {
         vi.useFakeTimers();
         const b = createRawTickReplayProtocol('test', () => false,
