@@ -22,6 +22,21 @@ describe('visible Tick range planner', () => {
         expect(plan('2026-10-08T20:00:00', '2026-10-12T12:00:00')
             .selectedDates).not.toContain('2026-10-09');
     });
+    it('includes post-midnight holiday executions in the following trading date', () => {
+        const result = plan('2026-10-08T23:50:00', '2026-10-09T02:30:00');
+        expect(result.selectedDates).toEqual(['2026-10-12']);
+        expect(result.slices.map(s => s.session)).toEqual(['night', 'day']);
+        const afterMidnight = result.slices.find(s => s.session === 'day')!;
+        expect(afterMidnight.date).toBe('2026-10-12');
+        expect(afterMidnight.timeStart).toBe('00:00:00');
+        expect(afterMidnight.timeEnd).toBe('02:30:00');
+    });
+    it('does not suppress recent 3 dates when zoomed out over 45 calendar days', () => {
+        const result = plan('2026-08-01T09:00:00', '2026-10-08T18:00:00');
+        expect(result.unsupportedCalendar).toBe(false);
+        expect(result.selectedDates).toHaveLength(3);
+        expect(result.omittedDates).toBeGreaterThan(3);
+    });
     it('restricts day-only and respects 15 minute alignment', () => {
         const result = plan('2026-10-08T09:17:00', '2026-10-08T10:03:00', true);
         expect(result.slices).toHaveLength(1);

@@ -48,7 +48,10 @@ export function planVisibleTickSlices(
         !Number.isFinite(visibleToSeconds)) return empty();
     const fromMs = Math.min(visibleFromSeconds, visibleToSeconds) * 1000;
     const toMs = Math.max(visibleFromSeconds, visibleToSeconds) * 1000;
-    if (toMs - fromMs > 45 * DAY) return empty(false, true);
+    // The UI limits query DATES to 3, not the visible span itself.
+    // A 45-day zoom-out must still select the latest three trade dates.
+    // Unknown exchange years are dealt with by the calendar guard below.
+    if (toMs - fromMs > 366 * DAY) return empty(false, true);
 
     const isFuture = securityType === 'FUT' || securityType === 'OPT';
     const slices: VisibleTickSlice[] = [];
@@ -83,17 +86,27 @@ export function planVisibleTickSlices(
             continue;
         }
         if (!active) continue;
+        let morningStart = date;
         if (!dayOnly) {
             const previous = previousTaifexTradingDay(date);
             if (previous === null) {
                 unsupportedCalendar = true;
             } else {
                 intersect(date, 'night', wall(previous, '15:00:00'), wall(previous, '23:59:59'));
+                // On a long weekend, the previous session's post-midnight
+                // executions live on the CALENDAR day immediately after the
+                // preceding night (e.g. Oct 9 01:00 belongs to Oct 12).
+                // The broker accepts a clock-time query per trading date;
+                // keep the second slice encompassing that possible morning
+                // and the eventual day session without adding a 7th query.
+                morningStart = step(previous, 1);
             }
         }
         intersect(
             date, 'day',
-            wall(date, dayOnly ? '08:45:00' : '00:00:00'),
+            wall(date, dayOnly ? '08:45:00' : '00:00:00') < wall(morningStart, '00:00:00')
+                ? wall(date, dayOnly ? '08:45:00' : '00:00:00')
+                : wall(dayOnly ? date : morningStart, dayOnly ? '08:45:00' : '00:00:00'),
             wall(date, '13:45:00'),
         );
     }
