@@ -21,11 +21,13 @@ import { OrderFlowBubbleLayer } from './order-flow-bubble-layer';
 const MAX_TRADES = 300_000;
 const NOTIFY_MS = 48;
 const DEBOUNCE_MS = 300;
+type DateState = SliceCoverage | 'loading' | 'stale';
 type Coverage = {
     requested: string[];
     selected: string[];
+    loaded: string[];
     omitted: number;
-    dates: Record<string, SliceCoverage>;
+    dates: Record<string, DateState>;
     loading: number;
     total: number;
     truncated: boolean;
@@ -34,13 +36,14 @@ type Coverage = {
     unsupportedTimeframe: boolean;
     activeUnverified: boolean;
     quota: number | null;
+    checkedAt: number | null;
     blocked: 'quota' | 'unknown' | null;
 };
 const initialCoverage = (): Coverage => ({
-    requested: [], selected: [], omitted: 0, dates: {},
+    requested: [], selected: [], loaded: [], omitted: 0, dates: {},
     loading: 0, total: 0, truncated: false, replayTruncated: false,
     unsupportedCalendar: false, unsupportedTimeframe: false,
-    activeUnverified: false, quota: null, blocked: null,
+    activeUnverified: false, quota: null, checkedAt: null, blocked: null,
 });
 function coverageLabel(coverage: Coverage): string | null {
     if (coverage.unsupportedTimeframe) return '成交氣泡僅支援 60m 以下';
@@ -48,7 +51,7 @@ function coverageLabel(coverage: Coverage): string | null {
         return '歷史行情流量已用 ' + (coverage.quota?.toFixed(1) ?? '80') + '%，已停止補載成交氣泡';
     if (coverage.blocked === 'unknown') return '無法確認流量額度，未送出歷史查詢';
     if (coverage.unsupportedCalendar) return 'DATA GAP · 交易所行事曆未支援，未推測交易日';
-    if (Object.values(coverage.dates).some(s => s === 'error' || s === 'gap'))
+    if (Object.values(coverage.dates).some(s => s === 'error' || s === 'gap' || s === 'empty'))
         return 'DATA GAP · 部分歷史成交缺失或交易日不符';
     if (coverage.omitted > 0)
         return '僅載入可視範圍最新 3 個交易日（其他 ' + coverage.omitted + ' 日未查詢）';
@@ -137,12 +140,13 @@ export function OrderFlowBubbleIndicator({
         let onRange: (() => void) | undefined;
         let subscribedChart: IChartApi | null = null;
         let subscribedCandle: ISeriesApi<'Candlestick'> | null = null;
-        const dateStates = new Map<string, SliceCoverage>();
+        const dateStates = new Map<string, DateState>();
         let currentPlan = planVisibleTickSlices(
             contract.security_type, dayOnly, timeframeMinutes, NaN, NaN,
         );
         let blocked: 'quota' | 'unknown' | null = null;
         let quota: number | null = null;
+        let checkedAt: number | null = null;
         let truncated = false;
         let ownerIncomplete = false;
         let inFlight = 0;
@@ -160,17 +164,28 @@ export function OrderFlowBubbleIndicator({
 
         const updateCoverage = () => {
             if (cancelled) return;
-            const dates: Record<string, SliceCoverage> = {};
+            const dates: Record<string, DateState> = {};
+            const severity: Record<DateState, number> = {
+                quota: 7, unknown: 7, error: 6, gap: 5, empty: 5,
+                stale: 3, loading: 2, ready: 1, cancelled: 0,
+            };
             for (const slice of currentPlan.slices) {
                 const state = dateStates.get(sliceId(slice));
-                if (state) {
-                    const existing = dates[slice.date];
-                    if (!existing || state !== 'ready') dates[slice.date] = state;
+                if (state && (dates[slice.date] === undefined ||
+                    severity[state] > severity[dates[slice.date]!])) {
+                    dates[slice.date] = state;
                 }
             }
+            const loaded = currentPlan.selectedDates.filter(date => {
+                const slices = currentPlan.slices.filter(slice => slice.date === date);
+                return slices.length > 0 && slices.every(slice =>
+                    dateStates.get(sliceId(slice)) === 'ready' ||
+                    dateStates.get(sliceId(slice)) === 'stale');
+            });
             setCoverage({
                 requested: currentPlan.requestedDates,
                 selected: currentPlan.selectedDates,
+                loaded,
                 omitted: currentPlan.omittedDates,
                 dates,
                 loading: inFlight, total: currentPlan.slices.length,
@@ -178,7 +193,7 @@ export function OrderFlowBubbleIndicator({
                 unsupportedCalendar: currentPlan.unsupportedCalendar,
                 unsupportedTimeframe: currentPlan.unsupportedTimeframe,
                 activeUnverified: currentPlan.selectedDates.some(d => d >= todayTW()),
-                quota, blocked,
+                quota, checkedAt, blocked,
             });
         };
         const markTruncated = () => { truncated = true; updateCoverage(); };
@@ -263,7 +278,7 @@ export function OrderFlowBubbleIndicator({
                 for (const slice of plan.slices) {
                     if (cancelled || generation !== generationRef.current || blocked) return;
                     const key = sliceId(slice);
-                    dateStates.set(key, 'cancelled');
+                    dateStates.set(key, 'loading');
                     inFlight++;
                     updateCoverage();
                     const answer = await fetchOrderFlowVisibleSlice(contract, slice, {
@@ -273,8 +288,12 @@ export function OrderFlowBubbleIndicator({
                     });
                     if (cancelled || generation !== generationRef.current) return;
                     inFlight--;
-                    dateStates.set(key, answer.status);
+                    dateStates.set(key,
+                        answer.status === 'ready' && slice.date >= todayTW()
+                            ? 'stale' : answer.status,
+                    );
                     if (answer.percent !== null) quota = answer.percent;
+                    if (answer.checkedAt !== null) checkedAt = answer.checkedAt;
                     if (answer.status === 'quota' || answer.status === 'unknown')
                         blocked = answer.status === 'quota' ? 'quota' : 'unknown';
                     if (answer.truncated) truncated = true;

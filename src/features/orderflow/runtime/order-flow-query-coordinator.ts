@@ -12,7 +12,7 @@ import { classifyTickType } from './tick-aggregator';
 import { orderFlowEventTradingDate } from './trading-date';
 import type { VisibleTickSlice } from './visible-tick-range';
 
-export type SliceCoverage = 'ready' | 'gap' | 'error' | 'quota' | 'unknown' | 'cancelled';
+export type SliceCoverage = 'ready' | 'gap' | 'empty' | 'error' | 'quota' | 'unknown' | 'cancelled';
 export interface OrderFlowSliceResult {
     slice: VisibleTickSlice;
     status: SliceCoverage;
@@ -107,7 +107,7 @@ function validate(
         });
     }
     if (truncated || rejected || ticks.length === 0) {
-        return result(slice, 'gap', ticks,
+        return result(slice, ticks.length === 0 && rejected === 0 && !truncated ? 'empty' : 'gap', ticks,
             truncated ? 'Tick 超過記憶體上限，已截斷' :
                 rejected ? 'API 回傳錯誤交易日／時間或無效成交' : '查詢區間沒有可驗證的歷史成交',
             percent, checkedAt, truncated);
@@ -273,10 +273,10 @@ export function fetchOrderFlowVisibleSlice(
         // recover from a temporary bad-date fallback later.
         entry.expiresAt = answer.status === 'ready'
             ? (slice.date < currentTradingDay() ? Number.POSITIVE_INFINITY : Date.now() + CACHE_ACTIVE_MS)
-            : answer.status === 'gap'
+            : answer.status === 'gap' || answer.status === 'empty'
                 ? Date.now() + CACHE_ACTIVE_MS
                 : Date.now();
-        if (!['ready', 'gap'].includes(answer.status) &&
+        if (!['ready', 'gap', 'empty'].includes(answer.status) &&
             entries.get(key) === entry) entries.delete(key);
         // LRU bound also limits the total retained Tick payload. Six large
         // two-segment days must not pin multiple millions of JS objects.
