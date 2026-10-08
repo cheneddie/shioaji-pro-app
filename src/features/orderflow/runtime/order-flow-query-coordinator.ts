@@ -181,11 +181,18 @@ async function guardedRequest(
             const afterQuota = quotaState(after);
             answer.percent = afterQuota.percent;
             answer.checkedAt = Date.now();
+            // Do not initiate another queued slice after the usage refresh
+            // reaches the threshold. Keep valid ticks from this response.
             if (afterQuota.percent === null) {
+                answer.status = 'unknown';
                 answer.error = '歷史查詢後無法確認流量額度';
+            } else if (after.remaining_bytes === 0 || afterQuota.percent >= 80) {
+                answer.status = 'quota';
+                answer.error = `歷史行情流量已用 ${afterQuota.percent.toFixed(1)}%，已停止補載成交氣泡`;
             }
         } catch {
-            answer.error = answer.error || '歷史查詢後用量無法確認';
+            answer.status = 'unknown';
+            answer.error = '歷史查詢後無法確認流量額度';
         }
         return answer;
     });
@@ -231,10 +238,15 @@ export function fetchOrderFlowVisibleSlice(
     liveRequests.add(promise);
     void promise.then(answer => {
         liveRequests.delete(promise);
-        entry.expiresAt = (answer.status === 'ready' || answer.status === 'gap')
+        // A gap is not a verified complete historical slice. Never pin it
+        // permanently, even for a past trading date: the provider might
+        // recover from a temporary bad-date fallback later.
+        entry.expiresAt = answer.status === 'ready'
             ? (slice.date < currentTradingDay() ? Number.POSITIVE_INFINITY : Date.now() + CACHE_ACTIVE_MS)
-            : Date.now();
-        if (answer.status !== 'ready' && answer.status !== 'gap' &&
+            : answer.status === 'gap'
+                ? Date.now() + CACHE_ACTIVE_MS
+                : Date.now();
+        if (!['ready', 'gap'].includes(answer.status) &&
             entries.get(key) === entry) entries.delete(key);
     });
     while (entries.size > CACHE_LIMIT) {
