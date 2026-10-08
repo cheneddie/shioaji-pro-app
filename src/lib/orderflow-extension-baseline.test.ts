@@ -140,7 +140,11 @@ describe('Order Flow extension native-panel baseline', () => {
         expect(kline).not.toContain("from '../../../lib/indicator-defs'");
         expect(bubble).toContain('getOrderFlowRuntime');
         expect(bubble).toContain('runtime.subscribeTicks');
-        expect(bubble).toMatch(/runtime\s*\.\s*loadHistory\s*\(/);
+        // Bubble historical queries now come from a quota-gated,
+        // visible-range coordinator, never a direct HTTP/stream import.
+        expect(bubble).toMatch(/fetchOrderFlowVisibleSlice\s*\(/);
+        expect(bubble).toMatch(/planVisibleTickSlices\s*\(/);
+        expect(bubble).not.toContain("from '../../../lib/shioaji'");
         expect(bubble).not.toContain("from '../../../lib/stream'");
         expect(bubble).not.toContain('retainQuote');
         expect('flowladder' in BLOCK_META).toBe(true);

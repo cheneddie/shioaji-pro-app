@@ -1,15 +1,15 @@
-// src/features/orderflow/components/order-flow-bubble-indicator.test.tsx
-
-import {
-    act,
-    create,
-    type ReactTestRenderer,
-} from 'react-test-renderer';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractInfo } from '../../../lib/types/contract';
-import {
-    DEFAULT_BUBBLE_SETTINGS,
-} from '../domain/bubble';
+import { DEFAULT_BUBBLE_SETTINGS } from '../domain/bubble';
+
+const mocks = vi.hoisted(() => ({
+    query: vi.fn(),
+    visible: {
+        from: Date.UTC(2026, 9, 8, 9, 0, 0) / 1000,
+        to: Date.UTC(2026, 9, 8, 9, 30, 0) / 1000,
+    },
+}));
 
 const runtime = vi.hoisted(() => {
     let tickListener: ((tick: unknown) => void) | null = null;
@@ -19,17 +19,17 @@ const runtime = vi.hoisted(() => {
         release,
         offTick,
         retain: vi.fn(() => release),
-        subscribeTicks: vi.fn(
-            (listener: (tick: unknown) => void) => {
-                tickListener = listener;
-                return offTick;
-            },
-        ),
+        subscribeTicks: vi.fn((listener: (tick: unknown) => void) => {
+            tickListener = listener;
+            return offTick;
+        }),
         loadHistory: vi.fn(),
         bufferedTicks: vi.fn(() => ({ ticks: [], truncated: false })),
-        emit(tick: unknown) {
-            tickListener?.(tick);
-        },
+        ownerReplayTicks: vi.fn(async () => ({
+            ticks: [], truncated: false, missingOwner: false,
+            earliestMs: null, latestMs: null,
+        })),
+        emit(tick: unknown) { tickListener?.(tick); },
         reset() {
             tickListener = null;
             release.mockClear();
@@ -37,6 +37,7 @@ const runtime = vi.hoisted(() => {
             this.retain.mockClear();
             this.subscribeTicks.mockClear();
             this.loadHistory.mockReset();
+            this.ownerReplayTicks.mockClear();
         },
     };
 });
@@ -44,176 +45,142 @@ const runtime = vi.hoisted(() => {
 vi.mock('../runtime/order-flow-runtime', () => ({
     getOrderFlowRuntime: () => runtime,
 }));
-
+vi.mock('../runtime/order-flow-query-coordinator', () => ({
+    fetchOrderFlowVisibleSlice: mocks.query,
+}));
 vi.mock('./order-flow-bubble-layer', () => ({
-    OrderFlowBubbleLayer: ({
-        candidates,
-    }: {
-        candidates: unknown[];
-    }) => (
-        <div
-            data-testid='bubble-layer'
-            data-count={candidates.length}
-        />
+    OrderFlowBubbleLayer: ({ candidates }: { candidates: unknown[] }) => (
+        <div data-testid='bubble-layer' data-count={candidates.length} />
     ),
 }));
 
 import { OrderFlowBubbleIndicator } from './order-flow-bubble-indicator';
 
 const contract: ContractInfo = {
-    region: 'TW',
-    exchange: 'TAIFEX',
-    code: 'TXFR1',
-    security_type: 'FUT',
-    target_code: 'TXFJ6',
-    name: '臺股期貨',
-    currency: 'TWD',
-    limit_up: 0,
-    limit_down: 0,
-    reference: 100,
-    day_trade: 'Yes',
-    update_date: '2026-10-08',
-    category: 'TXF',
-    margin_trading_balance: 0,
-    short_selling_balance: 0,
-    tick: 1,
-    underlying_kind: 'I',
+    region: 'TW', exchange: 'TAIFEX',
+    code: 'TXFR1', security_type: 'FUT', target_code: 'TXFJ6',
+    name: '臺股期貨', currency: 'TWD',
+    limit_up: 0, limit_down: 0, reference: 100, day_trade: 'Yes',
+    update_date: '2026-10-08', category: 'TXF',
+    margin_trading_balance: 0, short_selling_balance: 0,
+    tick: 1, underlying_kind: 'I',
 };
-
 const colors = {
-    up: '#f00',
-    upVol: '#f008',
-    down: '#0f0',
-    downVol: '#0f08',
-    text: '#aaa',
-    grid: '#222',
-    crosshair: '#39f',
-    border: '#333',
-    labelBg: '#111',
+    up: '#f00', upVol: '#f008', down: '#0f0', downVol: '#0f08',
+    text: '#aaa', grid: '#222', crosshair: '#39f', border: '#333', labelBg: '#111',
 };
-
 const dummyRef = { current: null };
+const listeners = new Set<() => void>();
+const scale = {
+    getVisibleRange: () => mocks.visible,
+    subscribeVisibleTimeRangeChange: vi.fn((fn: () => void) => { listeners.add(fn); }),
+    unsubscribeVisibleTimeRangeChange: vi.fn((fn: () => void) => { listeners.delete(fn); }),
+};
+const candle = {
+    subscribeDataChanged: vi.fn((fn: () => void) => { listeners.add(fn); }),
+    unsubscribeDataChanged: vi.fn((fn: () => void) => { listeners.delete(fn); }),
+};
+const chartRef = { current: { timeScale: () => scale } };
+const candleRef = { current: candle };
 
 async function flush() {
-    for (let index = 0; index < 5; index += 1) {
-        await act(async () => {
-            await Promise.resolve();
-        });
+    for (let i = 0; i < 6; i++) {
+        await act(async () => { await Promise.resolve(); });
     }
 }
+async function completeVisibleDebounce() {
+    await act(async () => { await vi.advanceTimersByTimeAsync(305); });
+    await flush();
+}
 
-describe('OrderFlowBubbleIndicator runtime lifecycle', () => {
-    afterEach(() => vi.restoreAllMocks());
-
+function viewComponent() {
+    return (
+        <OrderFlowBubbleIndicator
+            contract={contract} timeframeMinutes={1} dayOnly={false}
+            runtimeSession='all' historyRevision={0}
+            settings={{ ...DEFAULT_BUBBLE_SETTINGS, enabled: true }}
+            hostRef={dummyRef} chartRef={chartRef as never}
+            candleRef={candleRef as never} colors={colors}
+        />
+    );
+}
+describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
     beforeEach(() => {
-        vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-08T02:00:00Z'));
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-08T02:00:00Z'));
         runtime.reset();
-        runtime.loadHistory.mockResolvedValue({
-            date: '2026-10-08',
-            ticks: [
-                {
-                    datetime: '2026-10-08 09:00:01.000',
-                    eventTimeMs: Date.UTC(
-                        2026,
-                        9,
-                        8,
-                        9,
-                        0,
-                        1,
-                    ),
-                    price: 100,
-                    volume: 10,
-                    tickType: 1,
-                    side: 'buy',
-                },
-            ],
-        });
+        mocks.query.mockReset().mockImplementation(async (_contract, slice) => ({
+            slice, status: 'ready', percent: 23, checkedAt: Date.now(),
+            truncated: false,
+            ticks: [{
+                datetime: '2026-10-08 09:00:01.000',
+                eventTimeMs: Date.UTC(2026, 9, 8, 9, 0, 1),
+                price: 100, volume: 10, tickType: 1, side: 'buy',
+            }],
+        }));
+        mocks.visible = {
+            from: Date.UTC(2026, 9, 8, 9, 0) / 1000,
+            to: Date.UTC(2026, 9, 8, 9, 30) / 1000,
+        };
+        listeners.clear();
     });
-
-    it('hydrates history through the shared runtime and releases ownership', async () => {
+    afterEach(() => {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+    it('queries current visible trading date and releases shared-runtime ownership', async () => {
         let view!: ReactTestRenderer;
-        await act(async () => {
-            view = create(
-                <OrderFlowBubbleIndicator
-                    contract={contract}
-                    timeframeMinutes={1}
-                    dayOnly={false}
-                    runtimeSession='all'
-                    historyRevision={0}
-                    settings={{
-                        ...DEFAULT_BUBBLE_SETTINGS,
-                        enabled: true,
-                    }}
-                    hostRef={dummyRef}
-                    chartRef={dummyRef}
-                    candleRef={dummyRef}
-                    colors={colors}
-                />,
-            );
-        });
-        await flush();
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
 
-        expect(runtime.retain).toHaveBeenCalledTimes(1);
-        expect(runtime.subscribeTicks).toHaveBeenCalledTimes(1);
-        expect(runtime.loadHistory).toHaveBeenCalledTimes(1);
-        expect(
-            view.root.findByProps({
-                'data-testid': 'bubble-layer',
-            }).props['data-count'],
-        ).toBe(1);
+        expect(runtime.retain).toHaveBeenCalledOnce();
+        expect(runtime.subscribeTicks).toHaveBeenCalledOnce();
+        expect(mocks.query).toHaveBeenCalledOnce();
+        expect(mocks.query.mock.calls[0]![1]).toMatchObject({
+            date: '2026-10-08', session: 'day',
+            timeStart: '08:45:00',
+        });
+        expect(runtime.loadHistory).not.toHaveBeenCalled();
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(1);
 
         await act(async () => view.unmount());
-        expect(runtime.offTick).toHaveBeenCalledTimes(1);
-        expect(runtime.release).toHaveBeenCalledTimes(1);
+        expect(runtime.offTick).toHaveBeenCalledOnce();
+        expect(runtime.release).toHaveBeenCalledOnce();
+        expect(scale.unsubscribeVisibleTimeRangeChange).toHaveBeenCalled();
     });
-
-    it('consumes live ticks from the same runtime consumer path', async () => {
+    it('keeps historical and subsequent live ticks visible together', async () => {
         let view!: ReactTestRenderer;
-        await act(async () => {
-            view = create(
-                <OrderFlowBubbleIndicator
-                    contract={contract}
-                    timeframeMinutes={1}
-                    dayOnly={false}
-                    runtimeSession='all'
-                    historyRevision={0}
-                    settings={{
-                        ...DEFAULT_BUBBLE_SETTINGS,
-                        enabled: true,
-                    }}
-                    hostRef={dummyRef}
-                    chartRef={dummyRef}
-                    candleRef={dummyRef}
-                    colors={colors}
-                />,
-            );
-        });
-        await flush();
-
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
         await act(async () => {
             runtime.emit({
-                code: 'TXFR1',
-                date: '2026/10/08',
-                time: '09:00:02.000',
-                price: 101,
-                volume: 5,
-                totalVolume: 15,
-                tickType: 2,
-                simtrade: false,
-                intradayOdd: false,
-                raw: {},
+                code: 'TXFR1', date: '2026/10/08', time: '09:00:02.000',
+                price: 101, volume: 5, totalVolume: 15, tickType: 2,
+                simtrade: false, intradayOdd: false, raw: {},
             });
-            await new Promise((resolve) =>
-                setTimeout(resolve, 60),
-            );
+            await vi.advanceTimersByTimeAsync(55);
         });
-
-        expect(
-            view.root.findByProps({
-                'data-testid': 'bubble-layer',
-            }).props['data-count'],
-        ).toBe(2);
-
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(2);
+        await act(async () => view.unmount());
+    });
+    it('presentation settings do not re-request history', async () => {
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
+        const once = mocks.query.mock.calls.length;
+        await act(async () => view.update(
+            <OrderFlowBubbleIndicator
+                contract={contract} timeframeMinutes={1} dayOnly={false}
+                runtimeSession='all' historyRevision={0}
+                settings={{
+                    ...DEFAULT_BUBBLE_SETTINGS, enabled: true, minimumVolume: 15,
+                }}
+                hostRef={dummyRef} chartRef={chartRef as never}
+                candleRef={candleRef as never} colors={colors}
+            />));
+        expect(mocks.query).toHaveBeenCalledTimes(once);
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(0);
         await act(async () => view.unmount());
     });
 });
