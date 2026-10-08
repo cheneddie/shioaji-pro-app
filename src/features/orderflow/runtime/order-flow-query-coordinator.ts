@@ -24,14 +24,17 @@ export interface OrderFlowSliceResult {
 }
 const CACHE_LIMIT = 16;
 const CACHE_TICK_LIMIT = 300_000;
+const CACHE_TOTAL_TICKS = 450_000;
 const INTERVAL_MS = 2_000;
 const CACHE_ACTIVE_MS = 60_000;
 type CacheEntry = {
+    key: string;
     identity: string;
     date: string;
     fromMs: number;
     toMs: number;
     expiresAt: number;
+    tickCount: number;
     promise: Promise<OrderFlowSliceResult>;
 };
 const entries = new Map<string, CacheEntry>();
@@ -220,8 +223,10 @@ export function fetchOrderFlowVisibleSlice(
             e.expiresAt > now);
     }
     if (found) {
-        entries.delete(key);
-        entries.set(key, found);
+        // A covering range has ITS OWN cache key. Do not duplicate the same
+        // slice under a new narrow key when the viewport zooms in.
+        entries.delete(found.key);
+        entries.set(found.key, found);
         return found.promise;
     }
     const stillNeeded = opts.stillNeeded ?? (() => true);
@@ -231,13 +236,14 @@ export function fetchOrderFlowVisibleSlice(
             error instanceof Error ? error.message : String(error)));
     localQueue = promise.then(() => undefined);
     const entry: CacheEntry = {
-        identity, date: slice.date, fromMs: slice.fromMs, toMs: slice.toMs,
-        expiresAt: Number.POSITIVE_INFINITY, promise,
+        key, identity, date: slice.date, fromMs: slice.fromMs, toMs: slice.toMs,
+        expiresAt: Number.POSITIVE_INFINITY, tickCount: 0, promise,
     };
     entries.set(key, entry);
     liveRequests.add(promise);
     void promise.then(answer => {
         liveRequests.delete(promise);
+        entry.tickCount = answer.ticks.length;
         // A gap is not a verified complete historical slice. Never pin it
         // permanently, even for a past trading date: the provider might
         // recover from a temporary bad-date fallback later.
@@ -248,11 +254,20 @@ export function fetchOrderFlowVisibleSlice(
                 : Date.now();
         if (!['ready', 'gap'].includes(answer.status) &&
             entries.get(key) === entry) entries.delete(key);
+        // LRU bound also limits the total retained Tick payload. Six large
+        // two-segment days must not pin multiple millions of JS objects.
+        let total = [...new Set(entries.values())].reduce((n, e) => n + e.tickCount, 0);
+        for (const [cacheKey, item] of entries) {
+            if (total <= CACHE_TOTAL_TICKS) break;
+            if (item === entry || liveRequests.has(item.promise)) continue;
+            entries.delete(cacheKey);
+            total -= item.tickCount;
+        }
     });
     while (entries.size > CACHE_LIMIT) {
-        const oldest = entries.keys().next().value;
-        if (oldest === undefined) break;
-        entries.delete(oldest);
+        const oldest = [...entries].find(([, entry]) => !liveRequests.has(entry.promise));
+        if (!oldest) break;
+        entries.delete(oldest[0]);
     }
     return promise;
 }
