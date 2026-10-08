@@ -3,9 +3,11 @@
 // events can be captured. Records always retain physical contract identity.
 // No synthesized trades, quotes, subscriptions or broker history requests.
 import { replayEventTimeMs } from './raw-tick-replay';
+import { getApiBase } from './runtime';
+import { knownServerInfo } from './server-info-store';
 import type { SseTick } from './types/market';
 
-const DB_NAME = 'sj-orderflow-raw-ticks-v1';
+const DB_NAME = 'sj-orderflow-raw-ticks-v2';
 const STORE = 'ticks';
 const MAX_PENDING = 10_000;
 const FLUSH_BATCH = 500;
@@ -17,6 +19,7 @@ const TW_OFFSET_MS = 8 * 60 * 60 * 1_000;
 
 interface StoredRawTick {
     id?: number;
+    scope: string;
     code: string;
     eventTimeMs: number; // Taiwan wall-clock UTC encoding, not true epoch.
     tick: SseTick;
@@ -28,6 +31,18 @@ export interface DiskTickReplay {
     truncated: boolean;
     earliestMs: number | null;
     latestMs: number | null;
+}
+
+/**
+ * Treat an unknown Sidecar mode as unavailable. Browser persistence is not
+ * permitted to mix production and simulation ticks when ports/modes change.
+ */
+export function recorderScope(base: string, simulation: boolean | undefined): string | null {
+    if (simulation === undefined || !base) return null;
+    return JSON.stringify([base, simulation ? 'simulation' : 'production']);
+}
+function currentScope(): string | null {
+    return recorderScope(getApiBase(), knownServerInfo()?.simulation);
 }
 
 const queue: StoredRawTick[] = [];
@@ -47,7 +62,7 @@ function dbOpen(): Promise<IDBDatabase> {
             const db = request.result;
             if (!db.objectStoreNames.contains(STORE)) {
                 const store = db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
-                store.createIndex('codeTime', ['code', 'eventTimeMs']);
+                store.createIndex('scopeCodeTime', ['scope', 'code', 'eventTimeMs']);
                 store.createIndex('eventTime', 'eventTimeMs');
             }
         };
@@ -150,11 +165,13 @@ export function queueRecordedRawTick(tick: SseTick): void {
     const eventTimeMs = replayEventTimeMs(tick);
     if (eventTimeMs === null) return;
     if (typeof indexedDB === 'undefined') return;
+    const scope = currentScope();
+    if (!scope) return;
     if (queue.length >= MAX_PENDING) {
         queue.shift();
         dropped = true;
     }
-    queue.push({ code: tick.code, eventTimeMs, tick });
+    queue.push({ scope, code: tick.code, eventTimeMs, tick });
     scheduleFlush();
 }
 
@@ -168,6 +185,8 @@ export async function readRecordedRawTicks(
         !Number.isFinite(fromMs) || !Number.isFinite(toMs) ||
         fromMs > toMs || toMs - fromMs > 45 * 86_400_000) return unavailable();
     if (typeof indexedDB === 'undefined' || typeof IDBKeyRange === 'undefined') return unavailable();
+    const scope = currentScope();
+    if (!scope) return unavailable();
     try {
         if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
         while (writing || queue.length) {
@@ -178,8 +197,10 @@ export async function readRecordedRawTicks(
         return await new Promise<DiskTickReplay>((resolve, reject) => {
             const tx = db.transaction(STORE, 'readonly');
             const store = tx.objectStore(STORE);
-            const range = IDBKeyRange.bound([physicalCode, fromMs], [physicalCode, toMs]);
-            const req = store.index('codeTime').openCursor(range, 'prev');
+            const range = IDBKeyRange.bound(
+                [scope, physicalCode, fromMs], [scope, physicalCode, toMs],
+            );
+            const req = store.index('scopeCodeTime').openCursor(range, 'prev');
             const ticks: SseTick[] = [];
             let truncated = dropped;
             req.onsuccess = () => {
@@ -187,7 +208,7 @@ export async function readRecordedRawTicks(
                 if (!cursor) return;
                 if (ticks.length >= MAX_READ) { truncated = true; return; }
                 const entry = cursor.value as StoredRawTick;
-                if (entry.code !== physicalCode || entry.eventTimeMs < fromMs ||
+                if (entry.scope !== scope || entry.code !== physicalCode || entry.eventTimeMs < fromMs ||
                     entry.eventTimeMs > toMs || replayEventTimeMs(entry.tick) !== entry.eventTimeMs) {
                     truncated = true;
                 } else ticks.push(entry.tick);
