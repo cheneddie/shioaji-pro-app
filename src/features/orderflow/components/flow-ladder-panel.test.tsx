@@ -86,7 +86,8 @@ describe('Development 7 FlowLadderPanel read-only lifecycle', () => {
         const price = view.root.findAllByProps({'data-price':100})[0]!;
         expect(price.props['data-last']).toBe('true');
         const values = price.findAllByType('span')
-            .map((s) => s.props.children);
+            .map((s) => Array.isArray(s.props.children)
+                ? s.props.children.join('') : s.props.children);
         expect(values).toEqual(expect.arrayContaining(['20','9','+6','15','12','40','30']));
         await act(async () => view.unmount());
         expect(m.off).toHaveBeenCalledOnce();
@@ -97,18 +98,21 @@ describe('Development 7 FlowLadderPanel read-only lifecycle', () => {
         let view!: ReactTestRenderer;
         await act(async()=> {
             view=create(<FlowLadderPanel panelId='ladder-2'
-                contract={contract} sessionMode='all' />);
+                contract={contract} sessionMode='all'
+                onSessionModeChange={() => undefined} />);
         });
         await flush();
         expect(m.getRuntime).toHaveBeenCalledWith(contract,'all');
         await act(async()=>view.update(
-            <FlowLadderPanel panelId='ladder-2' contract={contract} sessionMode='day' />,
+            <FlowLadderPanel panelId='ladder-2' contract={contract} sessionMode='day'
+                onSessionModeChange={() => undefined} />,
         ));
         await flush();
         expect(m.getRuntime).toHaveBeenCalledWith(contract,'day');
         await act(async()=>view.update(
             <FlowLadderPanel panelId='ladder-2'
-                contract={{...contract,code:'MXFR1'}} sessionMode='all' />,
+                contract={{...contract,code:'MXFR1'}} sessionMode='all'
+                onSessionModeChange={() => undefined} />,
         ));
         await flush();
         expect(m.getRuntime).toHaveBeenCalledWith(
