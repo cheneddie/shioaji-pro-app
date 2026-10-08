@@ -412,7 +412,11 @@ export function FootprintPanel({
                         ),
                     )
                     .filter(
-                        (trade): trade is FootprintTrade => trade !== null,
+                        (trade): trade is FootprintTrade =>
+                            trade !== null &&
+                            orderFlowEventTradingDate(
+                                contract.security_type, dayOnly, trade.eventTimeMs,
+                            ) === loadDate,
                     );
                 const pending = pendingTradesRef.current;
                 pendingTradesRef.current = [];
