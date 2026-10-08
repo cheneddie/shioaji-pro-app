@@ -35,7 +35,7 @@ import {
     Star,
     X,
 } from 'lucide-react';
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import {
     inOrderLabelArea,
     orderLineMayTakePointer,
@@ -84,7 +84,7 @@ import { setHoverPickedPrice, setPickedPrice } from '../lib/price-sync';
 import { cancelOrder, updateOrderPrice } from '../lib/shioaji';
 import { canUpdateOrderPrice } from '../lib/odd-lot';
 import { resetEscCancelArm } from '../lib/esc-cancel-arm';
-import { baseMode, getChartColors, useThemeSettings, themeKey as themeKeyOf } from '../lib/theme-store';
+import { baseMode, getChartColors, useThemeSettings, themeKey as themeKeyOf, type ChartColors } from '../lib/theme-store';
 import { notify, placeQuickOrder } from '../lib/trade';
 import { ORDER_CONTEXT_CHANGED_MESSAGE, useOrderContext } from '../hooks/use-order-context';
 import {
@@ -160,6 +160,42 @@ const MAX_HISTORY_DAYS = 1095; // ~3 years
 
 export type { ChartSessionMode };
 
+/**
+ * Opt-in Flow chart extension. Original `chart` routes never supply this prop.
+ * Execution, account confirmation, native drawings and indicators stay owned
+ * by CandleChart; the extension can only render additional analysis overlays.
+ */
+export interface CandleChartExtension {
+    /** Optional per-Flow-chart localStorage scope; native chart passes nothing. */
+    storageScope?: string;
+    indicatorInstances?: {
+        instances: IndicatorInstance[];
+        onChange: (next: IndicatorInstance[]) => void;
+    };
+    indicator?: {
+        label: string;
+        description: string;
+        enabled: boolean;
+        onSelect: () => void;
+    };
+    drawing?: {
+        label: string;
+        active: boolean;
+        onActiveChange: (active: boolean) => void;
+    };
+    renderOverlay: (ctx: {
+        hostRef: RefObject<HTMLDivElement | null>;
+        chartRef: RefObject<IChartApi | null>;
+        candleRef: RefObject<ISeriesApi<'Candlestick'> | null>;
+        timeframeMinutes: number;
+        dayOnly: boolean;
+        historyRevision: number;
+        colors: ChartColors;
+        tradeModeArmed: boolean;
+        drawingToolArmed: boolean;
+    }) => ReactNode;
+}
+
 export function CandleChart({
     panelId,
     contract,
@@ -169,6 +205,7 @@ export function CandleChart({
     onSessionModeChange,
     orderSettings: orderSettingsProp,
     onOrderSettingsChange,
+    extension,
 }: {
     panelId?: string;
     contract: ContractBase;
@@ -183,8 +220,13 @@ export function CandleChart({
     // 一起存；沒有時（彈出視窗）只在元件內
     orderSettings?: ChartOrderPanelState;
     onOrderSettingsChange?: (next: ChartOrderPanelState) => void;
+    /** Optional only for the separate orderflow_kline block. */
+    extension?: CandleChartExtension;
 }) {
     const hostRef = useRef<HTMLDivElement>(null);
+    const [extensionChartReady, setExtensionChartReady] = useState(false);
+    const extensionRef = useRef(extension);
+    extensionRef.current = extension;
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
     const volSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
@@ -237,8 +279,20 @@ export function CandleChart({
     // 沒有自訂過的市場用「設為預設」的值 — 圖表建立時就對股票與期貨兩種
     // 市場各取一份快照，之後別的圖按「設為預設」不會改到這張圖（包括它之後
     // 才切到的市場）；這張圖自己的「設為預設」才更新快照（#204）
+    const storageScope = extension?.storageScope;
+    const flowOrderDefaultsKey = storageScope ? `sj-pro-orderflow-order-defaults-${storageScope}` : null;
+    const readOrderDefault = (market: ChartOrderMarket): ChartOrderSettings => {
+        const fallback = loadChartOrderDefault(market);
+        if (!flowOrderDefaultsKey) return fallback;
+        try {
+            const saved = JSON.parse(localStorage.getItem(flowOrderDefaultsKey) ?? '{}') as Record<string, unknown>;
+            const value = saved[market];
+            return value && typeof value === 'object'
+                ? normalizeChartOrder(value as Partial<ChartOrderSettings>, market) : fallback;
+        } catch { return fallback; }
+    };
     const defaultSnapshot = useRef<Record<ChartOrderMarket, ChartOrderSettings> | null>(null);
-    defaultSnapshot.current ??= { S: loadChartOrderDefault('S'), F: loadChartOrderDefault('F') };
+    defaultSnapshot.current ??= { S: readOrderDefault('S'), F: readOrderDefault('F') };
     const defaultFor = (m: ChartOrderMarket) => defaultSnapshot.current![m];
     const savedOrder = panelOrder[orderMarket ?? 'S'];
     const marketSettings: ChartOrderSettings = useMemo(() => {
@@ -249,9 +303,17 @@ export function CandleChart({
     }, [savedOrder, orderMarket]);
     const lotPreferences = useRef(new Map<string, ChartOrderSettings['lot']>());
     const stockSettingsFor = (initial: boolean, previous?: ChartOrderSettings) => {
-        const lot = lotPreferences.current.get(contract.code) ?? loadOrderLotPreference(
-            'chart', contract, QUICK_ORDER_LOTS, initial ? marketSettings.lot : defaultFor('S').lot,
-        );
+        const fallback = initial ? marketSettings.lot : defaultFor('S').lot;
+        const localFlowLot = (() => {
+            if (!storageScope || contract.security_type !== 'STK') return null;
+            try {
+                const value = localStorage.getItem(`sj-pro-orderflow-lot-${storageScope}-${contract.code}`);
+                return value === 'Common' || value === 'IntradayOdd' ? value : null;
+            } catch { return null; }
+        })();
+        const lot = lotPreferences.current.get(contract.code) ?? (storageScope
+            ? (localFlowLot ?? fallback)
+            : loadOrderLotPreference('chart', contract, QUICK_ORDER_LOTS, fallback));
         // 換商品不沿用上一檔的單位；股數不能成為張數，零股換檔也歸 1。
         const reset = lot !== marketSettings.lot || (previous && (previous.lot !== lot || previous.lot === 'IntradayOdd'));
         return normalizeChartOrder({ ...marketSettings, lot, ...(reset ? { qty: 1 } : {}) }, 'S');
@@ -277,7 +339,10 @@ export function CandleChart({
         const settings = normalizeChartOrder({ ...next, ...(next.lot !== orderSettings.lot ? { qty: 1 } : {}) }, orderMarket);
         if (orderMarket === 'S') {
             lotPreferences.current.set(contract.code, settings.lot);
-            saveOrderLotPreference('chart', contract, settings.lot);
+            if (storageScope) {
+                try { localStorage.setItem(`sj-pro-orderflow-lot-${storageScope}-${contract.code}`, settings.lot); }
+                catch { /* Flow preference remains in memory */ }
+            } else saveOrderLotPreference('chart', contract, settings.lot);
             setStockOrder({ code: contract.code, source: savedOrder, settings });
         }
         const value = { ...panelOrder, [orderMarket]: settings };
@@ -311,15 +376,15 @@ export function CandleChart({
         }
     }, [isCombo, mode]);
     const [legacyInstances, setInstances] =
-        useState<IndicatorInstance[]>(loadInstances);
+        useState<IndicatorInstance[]>(() => extension?.indicatorInstances ? [] : loadInstances());
     const service = useContext(IndicatorInstanceContext);
-    const panelService = panelId ? service : null;
+    const panelService = extension?.indicatorInstances ? null : (panelId ? service : null);
     const panelState = useSyncExternalStore(
         panelService?.subscribe ?? (() => () => {}),
         () => panelService && panelId ? panelService.snapshot(panelId) : null,
     );
     useEffect(() => panelService && panelId ? panelService.registerPanel(panelId) : undefined, [panelService, panelId]);
-    const savedInstances = panelState?.instances ?? legacyInstances;
+    const savedInstances = extension?.indicatorInstances?.instances ?? panelState?.instances ?? legacyInstances;
     const [settingsDraft, setSettingsDraft] = useState<IndicatorInstance | null>(null);
     const settingsRevisionRef = useRef('');
     const settingsNewRef = useRef(false);
@@ -388,6 +453,10 @@ export function CandleChart({
     modeRef.current = mode;
     const armedDrawingSequenceRef = useRef<number | null>(null);
     const setTradeMode = (next: TradeMode) => {
+        // A click-to-trade tool must disarm the Flow-only VP drawing first.
+        if (next !== 'observe' && extensionRef.current?.drawing?.active) {
+            extensionRef.current.drawing.onActiveChange(false);
+        }
         modeRef.current = next;
         armedDrawingSequenceRef.current = next === 'observe' ? null : drawingsRef.current?.interactionSequence() ?? null;
         setMode(next);
@@ -493,8 +562,12 @@ export function CandleChart({
         chartRef.current = chart;
         candleSeriesRef.current = candles;
         volSeriesRef.current = vol;
+        if (extensionRef.current) setExtensionChartReady(true);
 
         chart.subscribeClick((param) => {
+            // Flow VP drawing owns clicks while armed; never turn those
+            // anchor clicks into a trade or a native picked price.
+            if (extensionRef.current?.drawing?.active) return;
             // 第二道防線：畫圖選取／草稿／拖曳／文字／量測均不能進入下單路徑。
             if (drawingsRef.current?.drawingBusy()) return;
             const m = modeRef.current;
@@ -628,6 +701,7 @@ export function CandleChart({
 
         return () => {
             chart.remove();
+            if (extensionRef.current) setExtensionChartReady(false);
             chartRef.current = null;
             candleSeriesRef.current = null;
             volSeriesRef.current = null;
@@ -1215,6 +1289,7 @@ export function CandleChart({
     }, [dataVersion, instancesKey, themeKey, tf.minutes, customVer]);
 
     const commitInstances = (list: IndicatorInstance[]) => {
+        if (extension?.indicatorInstances) { extension.indicatorInstances.onChange(list); return; }
         if (panelService && panelId && panelState) {
             try { panelService.replace(panelId, list, panelState.revision); }
             catch (e) { notify({ kind: 'err', title: '指標設定未儲存', body: e instanceof Error ? e.message : String(e) }); }
@@ -1224,8 +1299,20 @@ export function CandleChart({
         saveInstances(list);
     };
     // 點選指標 → 先開設定（圖上即時預覽），確定才算加入、取消整個撤掉
+    const flowTypeDefaultsKey = storageScope ? `sj-pro-orderflow-ind-defaults-${storageScope}` : null;
     const addIndicator = (type: string) => {
-        const inst = newInstance(type);
+        let inst = newInstance(type);
+        if (flowTypeDefaultsKey) {
+            try {
+                const all = JSON.parse(localStorage.getItem(flowTypeDefaultsKey) ?? '{}') as Record<string, Partial<IndicatorInstance>>;
+                const saved = all[type];
+                if (saved) inst = { ...inst, params: { ...inst.params, ...saved.params },
+                    ...(saved.styles ? { styles: saved.styles } : {}),
+                    ...(saved.precision !== undefined ? { precision: saved.precision } : {}),
+                    ...(saved.showLabels !== undefined ? { showLabels: saved.showLabels } : {}),
+                    ...(saved.showValues !== undefined ? { showValues: saved.showValues } : {}) };
+            } catch { /* invalid Flow defaults: use built-in definition */ }
+        }
         settingsRevisionRef.current = panelState?.revision ?? '';
         settingsNewRef.current = true;
         setSettingsDraft(inst);
@@ -1267,11 +1354,18 @@ export function CandleChart({
         next.splice(to, 0, item!);
         commitInstances(next);
     };
+    const flowFavsKey = storageScope ? `sj-pro-orderflow-ind-favorites-${storageScope}` : null;
     const toggleFavorite = (type: string) => {
-        const favs = loadFavorites();
+        const favs = flowFavsKey ? (() => {
+            try { return new Set<string>(JSON.parse(localStorage.getItem(flowFavsKey) ?? '[]') as string[]); }
+            catch { return new Set<string>(); }
+        })() : loadFavorites();
         if (favs.has(type)) favs.delete(type);
         else favs.add(type);
-        saveFavorites(favs);
+        if (flowFavsKey) {
+            try { localStorage.setItem(flowFavsKey, JSON.stringify([...favs])); }
+            catch { /* keep Flow-only preference transient */ }
+        } else saveFavorites(favs);
     };
     const cancelSettings = () => {
         setSettingsDraft(null);
@@ -1282,7 +1376,8 @@ export function CandleChart({
         const list = settingsNewRef.current ? [...savedInstances, settingsDraft]
             : savedInstances.map(i => i.id === settingsDraft.id ? settingsDraft : i);
         try {
-            if (panelService && panelId) panelService.replace(panelId, list, settingsRevisionRef.current);
+            if (extension?.indicatorInstances) extension.indicatorInstances.onChange(list);
+            else if (panelService && panelId) panelService.replace(panelId, list, settingsRevisionRef.current);
             else commitInstances(list);
             cancelSettings();
         } catch (e) {
@@ -1537,6 +1632,7 @@ export function CandleChart({
     }, [dataVersion]);
     const drawings = useChartDrawings({
         contract,
+        storageScopeKey: storageScope,
         contextKey: `${tf.minutes}:${dayOnly}:${historySeq}`,
         hostRef,
         chartRef,
@@ -1557,6 +1653,12 @@ export function CandleChart({
     });
     drawingArmedRef.current = drawings.tool !== null;
     drawingsRef.current = drawings;
+    // Selecting a native drawing tool automatically leaves the Flow VP mode.
+    useEffect(() => {
+        if (drawings.tool && extension?.drawing?.active) {
+            extension.drawing.onActiveChange(false);
+        }
+    }, [drawings.tool, extension?.drawing?.active]);
 
     // 畫圖存不進 localStorage（配額滿）— 畫面上的物件還在，但關掉就沒了。
     // 多張圖同時訂閱，notice 只由第一張拿到的圖發出
@@ -1888,7 +1990,12 @@ export function CandleChart({
                         settings={orderSettings}
                         onChange={setOrderSettings}
                         onSaveDefault={() => {
-                            saveChartOrderDefault(orderMarket, orderSettings);
+                            if (flowOrderDefaultsKey) {
+                                try {
+                                    const saved = JSON.parse(localStorage.getItem(flowOrderDefaultsKey) ?? '{}') as Record<string, unknown>;
+                                    localStorage.setItem(flowOrderDefaultsKey, JSON.stringify({ ...saved, [orderMarket]: orderSettings }));
+                                } catch { /* scoped Flow default stays in memory */ }
+                            } else saveChartOrderDefault(orderMarket, orderSettings);
                             defaultSnapshot.current![orderMarket] = orderSettings;
                             notify({ kind: 'info', title: '已設為圖表下單預設', body: `新開的${orderMarket === 'F' ? '期貨' : '股票'}圖表使用這組設定（不含帳號）；其他現有圖表維持原設定。` });
                         }}
@@ -1896,10 +2003,26 @@ export function CandleChart({
                         contractLabel={`${contract.code}${(contract as { name?: string }).name ? ` ${(contract as { name?: string }).name}` : ''}`}
                     />
                 )}
+                {extension?.drawing && (
+                    <button
+                        type='button'
+                        className={styles.modeBtn[extension.drawing.active ? 'armed' : 'normal']}
+                        title='Flow 專用時間範圍成交量分布畫圖'
+                        onClick={() => {
+                            if (!extension.drawing!.active) {
+                                setTradeMode('observe');
+                                drawings.setTool(null);
+                            }
+                            extension.drawing!.onActiveChange(!extension.drawing!.active);
+                        }}
+                    >
+                        {extension.drawing.label}
+                    </button>
+                )}
                 <button
                     className={
                         styles.indicatorBtn[
-                            instances.length > 0 ? 'active' : 'normal'
+                            instances.length > 0 || extension?.indicator?.enabled ? 'active' : 'normal'
                         ]
                     }
                     onClick={() => setPickerOpen(true)}
@@ -1911,7 +2034,15 @@ export function CandleChart({
                         instances={instances}
                         onAdd={addIndicator}
                         onClose={() => setPickerOpen(false)}
-                        onSaveDefaults={panelService ? () => {
+                        favoritesStorageKey={flowFavsKey ?? undefined}
+                        extraIndicator={extension?.indicator && {
+                            ...extension.indicator,
+                            onSelect: () => {
+                                setPickerOpen(false);
+                                extension.indicator!.onSelect();
+                            },
+                        }}
+                        onSaveDefaults={panelService && !storageScope ? () => {
                             saveInstances(savedInstances);
                             notify({ kind: 'info', title: '已儲存指標預設', body: '新圖與回測圖表使用此設定；其他現有面板維持原設定。' });
                         } : undefined}
@@ -1928,6 +2059,17 @@ export function CandleChart({
                             patchInstance(settingsInst.id, patch)
                         }
                         onRemove={() => removeIndicator(settingsInst.id)}
+                        onSaveTypeDefault={flowTypeDefaultsKey ? (inst) => {
+                            try {
+                                const all = JSON.parse(localStorage.getItem(flowTypeDefaultsKey) ?? '{}') as Record<string, unknown>;
+                                localStorage.setItem(flowTypeDefaultsKey, JSON.stringify({
+                                    ...all,
+                                    [inst.type]: { params: inst.params, styles: inst.styles,
+                                        precision: inst.precision, showLabels: inst.showLabels,
+                                        showValues: inst.showValues },
+                                }));
+                            } catch { /* Flow defaults remain unsaved */ }
+                        } : undefined}
                         onCommit={commitSettings}
                         onCancel={cancelSettings}
                     />
@@ -2090,6 +2232,13 @@ export function CandleChart({
                     );
                 })}
                 <ChartDrawingOverlays api={drawings} />
+                {extension && extensionChartReady && extension.renderOverlay({
+                    hostRef, chartRef, candleRef: candleSeriesRef,
+                    timeframeMinutes: tf.minutes, dayOnly,
+                    historyRevision: historySeq, colors,
+                    tradeModeArmed: mode !== 'observe',
+                    drawingToolArmed: drawings.tool !== null,
+                })}
             </div>
             <ChartObjectList api={drawings} />
             </div>

@@ -51,11 +51,13 @@ function Probe({
     tradeArmed,
     onEnterDrawingMode,
     host,
+    storageScopeKey,
 }: {
     receive: (v: ChartDrawingsApi) => void;
     tradeArmed: boolean;
     onEnterDrawingMode: () => void;
     host?: unknown;
+    storageScopeKey?: string;
 }) {
     const hostRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef(null);
@@ -64,6 +66,7 @@ function Probe({
     receive(
         useChartDrawings({
             contract,
+            storageScopeKey: storageScopeKey,
             hostRef,
             chartRef,
             seriesRef,
@@ -2309,5 +2312,22 @@ describe('第一期：多選、平行通道、量測、文字、復原、快捷�
         expect(api().drawings.map((d) => d.id)).toEqual([a.id, b.id]);
         expect(api().drawings[0]).toMatchObject({ hidden: false, locked: false });
         expect(api().drawings[0]!.name).toBeUndefined();
+    });
+});
+
+describe('Flow drawing scope isolation', () => {
+    it('isolates drawing identity and settings from native chart settings', async () => {
+        let native!: ChartDrawingsApi;
+        let flow!: ChartDrawingsApi;
+        await mount({ receive: (a) => (native = a), tradeArmed: false, onEnterDrawingMode: vi.fn() });
+        await mount({ receive: (a) => (flow = a), tradeArmed: false, onEnterDrawingMode: vi.fn(), storageScopeKey: 'flow-a' });
+        expect(native.symbolKey).toBe('TXF');
+        expect(flow.symbolKey).toBe('ORDERFLOW:flow-a:TXF');
+        await act(async () => { flow.setMagnet(true); });
+        expect(flow.magnet).toBe(true);
+        expect(native.magnet).toBe(false);
+        expect(getDrawingSettings().magnet).toBe(false);
+        expect(store.has('sj-pro-orderflow-drawing-settings-flow-a')).toBe(true);
+        expect(store.has('sj-pro-chart-drawing-settings')).toBe(false);
     });
 });

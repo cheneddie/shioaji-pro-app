@@ -776,3 +776,52 @@ describe('chart order settings button', () => {
         await act(async () => futChart.unmount());
     });
 });
+
+
+describe('Dev8.1 Flow chart native-trading / VP interlock', () => {
+    const makeExtension = (active: boolean, onActiveChange: (next: boolean) => void) => ({
+        indicator: {
+            label: 'Order Flow 成交氣泡',
+            description: '額外分析指標',
+            enabled: false,
+            onSelect: () => undefined,
+        },
+        drawing: {
+            label: 'VP 畫圖',
+            active,
+            onActiveChange,
+        },
+        renderOverlay: () => null,
+    });
+
+    it('prevents a stale armed trade click from executing during Flow VP anchor selection', async () => {
+        const onActiveChange = vi.fn();
+        await mount({ contract: stk, extension: makeExtension(true, onActiveChange) });
+        await act(async () => button(view.root, '點價買').props.onClick());
+        expect(onActiveChange).toHaveBeenCalledWith(false);
+        // Parent has not yet acknowledged VP-disarm: fail closed.
+        await clickChart();
+        expect(m.place).not.toHaveBeenCalled();
+        // Once VP really is disarmed, the normal native trade path is available.
+        await act(async () => view.update(createElement(CandleChart, {
+            contract: stk,
+            extension: makeExtension(false, onActiveChange),
+        })));
+        await clickChart();
+        expect(m.place).toHaveBeenCalledTimes(1);
+    });
+
+    it('arming VP drawing disarms the native trade mode before any chart click', async () => {
+        const onActiveChange = vi.fn();
+        await mount({ contract: stk, extension: makeExtension(false, onActiveChange) });
+        await act(async () => button(view.root, '點價買').props.onClick());
+        await act(async () => button(view.root, 'VP 畫圖').props.onClick());
+        expect(onActiveChange).toHaveBeenCalledWith(true);
+        await act(async () => view.update(createElement(CandleChart, {
+            contract: stk,
+            extension: makeExtension(true, onActiveChange),
+        })));
+        await clickChart();
+        expect(m.place).not.toHaveBeenCalled();
+    });
+});

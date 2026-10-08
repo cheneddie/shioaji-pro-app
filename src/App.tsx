@@ -12,6 +12,9 @@ import * as styles from './App.css';
 import { BottomDock } from './components/bottom-dock';
 import { AsyncStatus, type AsyncPhase } from './components/async-status';
 import { CandleChart } from './components/candle-chart';
+import { FootprintPanel } from './features/orderflow/components/footprint-panel';
+import { FlowLadderPanel } from './features/orderflow/components/flow-ladder-panel';
+import { OrderFlowWorkspacePanel } from './features/orderflow/components/order-flow-workspace-panel';
 import { ChipsCard } from './components/chips-card';
 import { ComboListPanel } from './components/combo-list';
 import { ComboTicket } from './components/combo-ticket';
@@ -126,6 +129,9 @@ import {
 
 const POPOUT_TYPES: ReadonlySet<string> = new Set([
     'chart',
+    'orderflow_kline',
+    'footprint',
+    'flowladder',
     'intraday',
     'depth',
     'ticket',
@@ -249,6 +255,52 @@ function BlockBody({
                         }
                     />
                 </>
+            ) : (
+                <BlockPlaceholder phase={missingContractPhase} />
+            );
+        case 'orderflow_kline':
+            return contract ? (
+                <OrderFlowWorkspacePanel
+                    panelId={block.id}
+                    contract={contract}
+                    snapshot={snapshot}
+                    trades={dockProps.trades}
+                    onOrdersChanged={dockProps.onTradesChanged}
+                    orderSettings={block.chartOrder}
+                    onOrderSettingsChange={(chartOrder) =>
+                        onSessionConfigChange(block.id, { chartOrder })
+                    }
+                    sessionMode={block.chartSession}
+                    onSessionModeChange={(chartSession) =>
+                        onSessionConfigChange(block.id, { chartSession })
+                    }
+                />
+            ) : (
+                <BlockPlaceholder phase={missingContractPhase} />
+            );
+        case 'footprint':
+            return contract ? (
+                <FootprintPanel
+                    panelId={block.id}
+                    contract={contract}
+                    sessionMode={block.chartSession}
+                    onSessionModeChange={(chartSession) =>
+                        onSessionConfigChange(block.id, { chartSession })
+                    }
+                />
+            ) : (
+                <BlockPlaceholder phase={missingContractPhase} />
+            );
+        case 'flowladder':
+            return contract ? (
+                <FlowLadderPanel
+                    panelId={block.id}
+                    contract={contract}
+                    sessionMode={block.chartSession}
+                    onSessionModeChange={(chartSession) =>
+                        onSessionConfigChange(block.id, { chartSession })
+                    }
+                />
             ) : (
                 <BlockPlaceholder phase={missingContractPhase} />
             );
@@ -466,6 +518,15 @@ function indexBlockMessage(type: BlockType): string | null {
     if (type === 'tape' || type === 'volprofile') {
         return '指數沒有即時 Tick 串流，此面板不支援盤中更新';
     }
+    if (type === 'orderflow_kline') {
+        return '指數沒有逐筆 Tick 串流，Order Flow K 線不支援';
+    }
+    if (type === 'footprint') {
+        return '指數沒有逐筆 Tick 串流，Footprint 不支援';
+    }
+    if (type === 'flowladder') {
+        return '指數缺少逐筆 Tick 與五檔委託簿，Order Flow 報價不支援';
+    }
     if (type === 'flash' || type === 'grid' || type === 'oddspread') {
         return '指數商品不可下單';
     }
@@ -483,6 +544,9 @@ function IndexBlockUnavailable({ type }: { type: BlockType }) {
 // 組合商品是行情/圖表身分 — 下單類面板要導向組合單（整體 action ×
 // 組合型別的展開語意，一般單腿下單面板無法表達）
 function comboBlockMessage(type: BlockType): string | null {
+    if (type === 'flowladder') {
+        return '組合商品報價不支援單商品逐價位 Order Flow 階梯';
+    }
     if (type === 'ticket' || type === 'grid' || type === 'flash' || type === 'oddspread') {
         return '組合商品請使用「組合單」面板下單';
     }
@@ -649,6 +713,38 @@ function PopoutView({
                             sessionMode={popoutChartSession}
                         />
                     </>
+                );
+                break;
+            case 'orderflow_kline':
+                body = (
+                    <OrderFlowWorkspacePanel
+                        key={contract.code}
+                        panelId={`popout-orderflow-kline-${contract.code}`}
+                        contract={contract}
+                        trades={tradesState.data ?? []}
+                        onOrdersChanged={tradesState.refresh}
+                        sessionMode={popoutChartSession}
+                    />
+                );
+                break;
+            case 'footprint':
+                body = (
+                    <FootprintPanel
+                        key={contract.code}
+                        panelId={`popout-footprint-${contract.code}`}
+                        contract={contract}
+                        sessionMode={popoutChartSession}
+                    />
+                );
+                break;
+            case 'flowladder':
+                body = (
+                    <FlowLadderPanel
+                        key={contract.code}
+                        panelId={`popout-flowladder-${contract.code}`}
+                        contract={contract}
+                        sessionMode={popoutChartSession}
+                    />
                 );
                 break;
             case 'intraday':

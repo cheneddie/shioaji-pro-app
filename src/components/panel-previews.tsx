@@ -150,6 +150,77 @@ export const PANEL_PREVIEWS: Record<BlockType, ReactNode> = {
             ))}
         </Frame>
     ),
+    orderflow_kline: (
+        <Frame>
+            {candles([
+                { x: 14, o: 46, c: 34, h: 30, l: 50 },
+                { x: 28, o: 34, c: 26, h: 22, l: 38 },
+                { x: 42, o: 26, c: 32, h: 22, l: 36 },
+                { x: 56, o: 32, c: 20, h: 16, l: 36 },
+                { x: 70, o: 20, c: 28, h: 16, l: 32 },
+                { x: 84, o: 28, c: 18, h: 14, l: 32 },
+                { x: 98, o: 18, c: 24, h: 14, l: 28 },
+            ])}
+            <rect x='10' y='61' width='8' height='7' fill={down} fillOpacity='0.55' />
+            <rect x='22' y='57' width='8' height='11' fill={up} fillOpacity='0.7' />
+            <rect x='34' y='63' width='8' height='5' fill={down} fillOpacity='0.55' />
+            <rect x='46' y='54' width='8' height='14' fill={up} fillOpacity='0.75' />
+            <rect x='58' y='59' width='8' height='9' fill={up} fillOpacity='0.65' />
+            <rect x='70' y='56' width='8' height='12' fill={down} fillOpacity='0.55' />
+            <rect x='82' y='51' width='8' height='17' fill={up} fillOpacity='0.8' />
+            <rect x='94' y='60' width='8' height='8' fill={down} fillOpacity='0.55' />
+            <Ln x={8} y={72} w={42} color={accent} o={0.8} />
+            <Ln x={70} y={72} w={42} color={accent} o={0.8} />
+        </Frame>
+    ),
+    footprint: (
+        <Frame>
+            {[0, 1, 2, 3, 4].map((row) =>
+                [0, 1, 2, 3].map((col) => {
+                    const buy = (row + col) % 3 !== 0;
+                    return (
+                        <g key={`${row}-${col}`}>
+                            <rect
+                                x={10 + col * 26}
+                                y={8 + row * 12}
+                                width='23'
+                                height='9'
+                                fill={buy ? up : down}
+                                fillOpacity={0.08 + ((row + col) % 4) * 0.07}
+                            />
+                            <Ln
+                                x={12 + col * 26}
+                                y={11 + row * 12}
+                                w={7}
+                                color={down}
+                                o={0.7}
+                            />
+                            <Ln
+                                x={24 + col * 26}
+                                y={11 + row * 12}
+                                w={7}
+                                color={up}
+                                o={0.8}
+                            />
+                        </g>
+                    );
+                }),
+            )}
+            <line x1='8' y1='69' x2='112' y2='69' stroke={accent} strokeOpacity='0.7' />
+        </Frame>
+    ),
+    flowladder: (
+        <Frame>
+            {[0, 1, 2, 3, 4].map((index) => (
+                <g key={index}>
+                    <Ln x={8} y={9 + index * 13} w={18} color={up} o={0.6} />
+                    <Ln x={34} y={9 + index * 13} w={22} color={down} o={0.5} />
+                    <Ln x={64} y={9 + index * 13} w={18} color={accent} o={0.8} />
+                    <Ln x={90} y={9 + index * 13} w={20} color={up} o={0.5} />
+                </g>
+            ))}
+        </Frame>
+    ),
     intraday: (
         <Frame>
             <line

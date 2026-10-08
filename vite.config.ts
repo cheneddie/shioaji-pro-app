@@ -24,6 +24,168 @@ const pkg = JSON.parse(
     fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'),
 ) as { version?: string };
 
+function shioajiLocalWatchlistPlugin(): import('vite').Plugin {
+    const watchlistsFile = path.resolve(__dirname, 'watchlists.json');
+    function loadWatchlists() {
+        if (fs.existsSync(watchlistsFile)) {
+            try {
+                return JSON.parse(fs.readFileSync(watchlistsFile, 'utf8'));
+            } catch {}
+        }
+        const defaultLists = [
+            {
+                id: 'default',
+                name: '我的自選',
+                contracts: [
+                    { security_type: 'STK', exchange: 'TSE', code: '2330' },
+                    { security_type: 'STK', exchange: 'TSE', code: '2317' },
+                    { security_type: 'STK', exchange: 'TSE', code: '2454' },
+                    { security_type: 'STK', exchange: 'TSE', code: '2603' },
+                    { security_type: 'STK', exchange: 'TSE', code: '0050' },
+                    { security_type: 'FUT', exchange: 'TAIFEX', code: 'TXFR1' },
+                ],
+            },
+        ];
+        fs.writeFileSync(watchlistsFile, JSON.stringify(defaultLists, null, 2), 'utf8');
+        return defaultLists;
+    }
+    function saveWatchlists(lists: any) {
+        fs.writeFileSync(watchlistsFile, JSON.stringify(lists, null, 2), 'utf8');
+    }
+
+    return {
+        name: 'shioaji-local-watchlist',
+        configureServer(server) {
+            server.middlewares.use((req, res, next) => {
+                const url = req.url?.split('?')[0];
+                if (url === '/api/v1/data/index_components') {
+                    res.setHeader('Content-Type', 'application/json');
+                    res.statusCode = 404;
+                    res.end(JSON.stringify({ code: 404, message: 'Index components not available in simulation mode' }));
+                    return;
+                }
+                if (url === '/api/v1/watchlist') {
+                    if (req.method === 'GET') {
+                        res.setHeader('Content-Type', 'application/json');
+                        res.statusCode = 200;
+                        res.end(JSON.stringify(loadWatchlists()));
+                        return;
+                    }
+                    if (req.method === 'POST') {
+                        let body = '';
+                        req.on('data', chunk => body += chunk);
+                        req.on('end', () => {
+                            const parsed = JSON.parse(body || '{}');
+                            const lists = loadWatchlists();
+                            const newList = {
+                                id: 'wl_' + Date.now(),
+                                name: parsed.name || '自選清單',
+                                contracts: parsed.contracts || [],
+                            };
+                            lists.push(newList);
+                            saveWatchlists(lists);
+                            res.setHeader('Content-Type', 'application/json');
+                            res.statusCode = 200;
+                            res.end(JSON.stringify(newList));
+                        });
+                        return;
+                    }
+                }
+                const match = url?.match(/^\/api\/v1\/watchlist\/([^\/]+)(.*)$/);
+                if (match) {
+                    const encodedWatchlistId = match[1];
+                    if (!encodedWatchlistId) {
+                        next();
+                        return;
+                    }
+                    const id = decodeURIComponent(encodedWatchlistId);
+                    const subpath = match[2];
+                    if (subpath === '' || subpath === '/') {
+                        if (req.method === 'PUT') {
+                            let body = '';
+                            req.on('data', chunk => body += chunk);
+                            req.on('end', () => {
+                                const parsed = JSON.parse(body || '{}');
+                                const lists = loadWatchlists();
+                                const target = lists.find((l: any) => l.id === id);
+                                if (target) {
+                                    if (parsed.contracts) target.contracts = parsed.contracts;
+                                    if (parsed.name) target.name = parsed.name;
+                                    saveWatchlists(lists);
+                                    res.setHeader('Content-Type', 'application/json');
+                                    res.statusCode = 200;
+                                    res.end(JSON.stringify(target));
+                                } else {
+                                    res.statusCode = 404;
+                                    res.end(JSON.stringify({ error: 'not found' }));
+                                }
+                            });
+                            return;
+                        }
+                        if (req.method === 'DELETE') {
+                            let lists = loadWatchlists();
+                            lists = lists.filter((l: any) => l.id !== id);
+                            saveWatchlists(lists);
+                            res.setHeader('Content-Type', 'application/json');
+                            res.statusCode = 200;
+                            res.end(JSON.stringify({ ok: true }));
+                            return;
+                        }
+                    } else if (subpath === '/contracts') {
+                        if (req.method === 'POST') {
+                            let body = '';
+                            req.on('data', chunk => body += chunk);
+                            req.on('end', () => {
+                                const parsed = JSON.parse(body || '{}');
+                                const lists = loadWatchlists();
+                                const target = lists.find((l: any) => l.id === id);
+                                if (target) {
+                                    for (const c of (parsed.contracts || [])) {
+                                        if (!target.contracts.some((x: any) => x.code === c.code)) {
+                                            target.contracts.push(c);
+                                        }
+                                    }
+                                    saveWatchlists(lists);
+                                    res.setHeader('Content-Type', 'application/json');
+                                    res.statusCode = 200;
+                                    res.end(JSON.stringify(target));
+                                } else {
+                                    res.statusCode = 404;
+                                    res.end(JSON.stringify({ error: 'not found' }));
+                                }
+                            });
+                            return;
+                        }
+                        if (req.method === 'DELETE') {
+                            let body = '';
+                            req.on('data', chunk => body += chunk);
+                            req.on('end', () => {
+                                const parsed = JSON.parse(body || '{}');
+                                const lists = loadWatchlists();
+                                const target = lists.find((l: any) => l.id === id);
+                                if (target) {
+                                    const toRemove = new Set((parsed.contracts || []).map((c: any) => c.code));
+                                    target.contracts = target.contracts.filter((c: any) => !toRemove.has(c.code));
+                                    saveWatchlists(lists);
+                                    res.setHeader('Content-Type', 'application/json');
+                                    res.statusCode = 200;
+                                    res.end(JSON.stringify(target));
+                                } else {
+                                    res.statusCode = 404;
+                                    res.end(JSON.stringify({ error: 'not found' }));
+                                }
+                            });
+                            return;
+                        }
+                    }
+                }
+                next();
+            });
+        },
+    };
+}
+
+
 export default defineConfig(({ mode, command }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const devPort = command === 'serve' ? env.VITE_DEV_SERVER_PORT : undefined;
@@ -114,7 +276,7 @@ export default defineConfig(({ mode, command }) => {
                     .trim(),
             ),
         },
-        plugins: [vanillaExtractPlugin(), react()],
+        plugins: [vanillaExtractPlugin(), react(), shioajiLocalWatchlistPlugin()],
         test: {
             // The desktop overlay is mirrored here for Tauri dev/CI, but its
             // Rust-adjacent Node tests use node:test rather than Vitest.
