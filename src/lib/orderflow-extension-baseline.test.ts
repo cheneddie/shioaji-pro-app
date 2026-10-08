@@ -39,7 +39,15 @@ describe('Order Flow extension native-panel baseline', () => {
             pinnable: true,
             singleton: false,
         });
-        expect(switchCaseBody('orderflow_kline')).toContain('<OrderFlowKlinePanel');
+        expect(switchCaseBody('orderflow_kline')).toContain('<OrderFlowWorkspacePanel');
+        const switcher = readFileSync(
+            new URL('../features/orderflow/components/order-flow-workspace-panel.tsx', import.meta.url),
+            'utf8',
+        );
+        expect(switcher).toContain('<OrderFlowKlinePanel');
+        expect(switcher).toContain('<FootprintPanel');
+        expect(switcher).toContain('<CandleChart');
+        expect(switcher).toContain("view === 'native'");
         expect(BLOCK_META.footprint).toMatchObject({
             category: 'market',
             pinnable: true,

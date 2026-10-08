@@ -1,5 +1,5 @@
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { ContractInfo } from '../../../lib/types/contract';
 
 vi.mock('../../../components/quote-board', () => ({
@@ -21,7 +21,16 @@ const contract = {
     exchange: 'TAIFEX', name: '臺指期', reference: 100,
 } as ContractInfo;
 
-beforeEach(() => localStorage.clear());
+const store = new Map<string, string>();
+beforeEach(() => {
+    store.clear();
+    vi.stubGlobal('localStorage', {
+        clear: () => store.clear(),
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => { store.set(key, value); },
+    });
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Dev8 Order Flow workspace mode isolation', () => {
     it('switches between independent Flow, native chart and Footprint without changing native routes', async () => {
