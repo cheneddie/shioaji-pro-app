@@ -15,6 +15,7 @@ import { isChildWindow } from './window-role';
 import { forgetServerInfo, knownServerInfo } from './server-info-store';
 import { createSharedStream, type StreamWire } from './shared-stream';
 import { invalidateTradingMirror } from './trading-mirror-lease';
+import { createRawTickReplayProtocol } from './raw-tick-replay';
 
 /** `stale`: the EventSource still looks open but no heartbeat or event
  *  arrived within the watchdog window (e.g. the sidecar behind a proxy was
@@ -77,6 +78,64 @@ const oddQuoteListeners = new Map<string, Set<Listener>>();
 const statusListeners = new Set<Listener>();
 const orderEventListeners = new Set<(ev: OrderEventReport) => void>();
 const tickTapeListeners = new Set<(tick: SseTick) => void>();
+// Order Flow needs every regular-lot event before React's 50 ms notification
+// batching. Keep these listeners separate from onAnyTick(), whose long-standing
+// contract is real trades only (!simtrade && volume > 0).
+const rawTickListeners = new Set<(tick: SseTick) => void>();
+
+// Opportunistic raw Tick replay shared by every panel in THIS window.
+// No extra API subscription is made. It only contains events actually
+// received by stream.ts since the window started; it is not history.
+// Keep physical source codes separate from continuous-contract aliases.
+const RAW_TICK_BUFFER_PER_CODE = 250_000;
+const RAW_TICK_BUFFER_MAX_CODES = 6;
+const RAW_TICK_TRIM_BATCH = 1_000;
+interface RawTickBuffer {
+    ticks: SseTick[];
+    truncated: boolean;
+}
+const rawTickBuffers = new Map<string, RawTickBuffer>();
+
+let crossWindowReplay: ReturnType<typeof createRawTickReplayProtocol> | null = null;
+export function requestOwnerRawTickReplay(code: string, fromMs: number, toMs: number) {
+    ensureStream();
+    return crossWindowReplay
+        ? crossWindowReplay.request(code, fromMs, toMs)
+        : Promise.resolve({
+            ticks: [], truncated: true, missingOwner: true,
+            earliestMs: null, latestMs: null,
+        });
+}
+
+
+export function snapshotRecentRawTicks(code: string): { ticks: SseTick[]; truncated: boolean } {
+    const buffer = rawTickBuffers.get(code);
+    return {
+        ticks: buffer ? [...buffer.ticks] : [],
+        truncated: buffer?.truncated ?? false,
+    };
+}
+
+function saveRawTick(tick: SseTick) {
+    if (tick.intraday_odd || tick.simtrade || !Number.isFinite(tick.volume) ||
+        tick.volume <= 0) return;
+    let buffer = rawTickBuffers.get(tick.code);
+    if (!buffer) {
+        if (rawTickBuffers.size >= RAW_TICK_BUFFER_MAX_CODES) {
+            const oldest = rawTickBuffers.keys().next().value;
+            if (oldest !== undefined) rawTickBuffers.delete(oldest);
+        }
+        buffer = { ticks: [], truncated: false };
+        rawTickBuffers.set(tick.code, buffer);
+    }
+    buffer.ticks.push(tick);
+    if (buffer.ticks.length > RAW_TICK_BUFFER_PER_CODE + RAW_TICK_TRIM_BATCH) {
+        buffer.ticks.splice(0, RAW_TICK_TRIM_BATCH);
+        buffer.truncated = true;
+    }
+}
+
+const bidAskTapeListeners = new Set<(bidask: SseBidAsk) => void>();
 const oddTickListeners = new Set<(tick: SseTick) => void>();
 const contractEventListeners = new Set<
     (event: ContractChangeEvent) => void
@@ -173,7 +232,7 @@ function handleTick(raw: string) {
     }
     ingestTick(tick);
     const alias = codeAlias.get(tick.code);
-    if (alias) ingestTick({ ...tick, code: alias });
+    if (alias) ingestTick({ ...tick, code: alias }, false);
 }
 
 function nextTickState(prev: QuoteState | undefined, tick: SseTick): QuoteState {
@@ -202,10 +261,21 @@ function ingestOddTick(tick: SseTick) {
     if (!tick.simtrade && tick.volume > 0) oddTickListeners.forEach((l) => l(tick));
 }
 
-function ingestTick(tick: SseTick) {
+function ingestTick(tick: SseTick, captureRaw = true) {
+    if (captureRaw) saveRawTick(tick);
     const state = nextTickState(quotes.get(tick.code), tick);
     quotes.set(tick.code, state);
     emitQuote(tick.code);
+    // Raw consumers (Order Flow) see every regular-lot tick, including
+    // simtrade / zero-volume events. A listener failure must never block the
+    // existing tape/trigger path.
+    rawTickListeners.forEach((listener) => {
+        try {
+            listener(tick);
+        } catch (err) {
+            console.error('[stream] raw tick listener threw', err);
+        }
+    });
     // flash only on real deals — simtrade (試撮) updates must not blink
     if (!tick.simtrade && tick.volume > 0) {
         tickTapeListeners.forEach((l) => l(tick));
@@ -238,6 +308,16 @@ function handleBidAsk(raw: string) {
 function ingestBidAsk(bidask: SseBidAsk) {
     quotes.set(bidask.code, nextBidAskState(quotes.get(bidask.code), bidask));
     emitQuote(bidask.code);
+    // Raw book consumers must observe every event rather than the 50 ms
+    // React notification snapshots. This is additive: the quote store and
+    // its batching semantics remain unchanged.
+    bidAskTapeListeners.forEach((listener) => {
+        try {
+            listener(bidask);
+        } catch (err) {
+            console.error('[stream] bidask listener threw', err);
+        }
+    });
 }
 
 const INDEX_UPSTREAM_ALIASES: Record<string, string> = {
@@ -807,6 +887,12 @@ let started = false;
 export function ensureStream() {
     if (!started) {
         started = true;
+        crossWindowReplay ??= createRawTickReplayProtocol(
+            'sj-orderflow-replay:' +
+                (typeof location === 'undefined' ? 'test' : location.origin) +
+                ':' + getApiBase() + ':' + getStreamBase(),
+            isStreamOwner, snapshotRecentRawTicks,
+        );
         shared = createSharedStream({
             name: `sj-market-stream:${typeof location === 'undefined' ? 'test' : location.origin}:${getApiBase()}:${getStreamBase()}`,
             main: !isChildWindow(),
@@ -896,6 +982,26 @@ export function onAnyTick(listener: (tick: SseTick) => void) {
     };
 }
 
+/** Every regular-lot tick before React quote notification batching.
+ *  Unlike onAnyTick(), this intentionally includes simtrade / zero-volume
+ *  events. Continuous-contract aliases follow the same ingest semantics as
+ *  the quote store, so consumers can subscribe by display code. */
+export function onRawTick(listener: (tick: SseTick) => void) {
+    rawTickListeners.add(listener);
+    return () => {
+        rawTickListeners.delete(listener);
+    };
+}
+
+/** Every regular-lot bid/ask event before React quote notification batching.
+ *  Odd-lot books remain isolated in the odd quote store. */
+export function onAnyBidAsk(listener: (bidask: SseBidAsk) => void) {
+    bidAskTapeListeners.add(listener);
+    return () => {
+        bidAskTapeListeners.delete(listener);
+    };
+}
+
 /** Real (non-simtrade) 盤中零股 trades — kept apart from onAnyTick. */
 export function onOddLotTick(listener: (tick: SseTick) => void) {
     oddTickListeners.add(listener);
@@ -917,7 +1023,7 @@ export function onContractEvent(
 // SSE 連線與殭屍 listener（每 tick 重複灌、CPU 飆高）。一變更就整頁
 // 重載，開發期不會再累積疊層。
 if (import.meta.hot) {
-    import.meta.hot.dispose(() => { if (watchdogTimer) clearInterval(watchdogTimer); shared?.close(); es?.close(); });
+    import.meta.hot.dispose(() => { if (watchdogTimer) clearInterval(watchdogTimer); crossWindowReplay?.close(); shared?.close(); es?.close(); });
     import.meta.hot.accept(() => {
         import.meta.hot?.invalidate();
     });

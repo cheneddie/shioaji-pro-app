@@ -1533,3 +1533,99 @@ describe('規則 R：墓碑刪除任何版本、合併不默默丟其他物件',
         expect(addDrawing('TXF', 'trend', anchors, DEFAULT_DRAWING_STYLE)).toBeNull();
     });
 });
+
+describe('Flow drawing persistence never alters native drawing collections', () => {
+    it('routes Flow objects and tombstones to scoped storage without rewriting native objects', () => {
+        addDrawing('TXF', 'horizontal', [{ time: 1, price: 100 }], DEFAULT_DRAWING_STYLE);
+        flushDrawingWrites();
+        const nativeBefore = store.get('sj-pro-chart-drawings');
+        expect(nativeBefore).toBeTruthy();
+
+        const flow = addDrawing('ORDERFLOW:flow-a:TXF', 'horizontal',
+            [{ time: 2, price: 101 }], DEFAULT_DRAWING_STYLE);
+        expect(flow).not.toBeNull();
+        flushDrawingWrites();
+        const nativeAfter = store.get('sj-pro-chart-drawings');
+        const flowSaved = JSON.parse(store.get('sj-pro-orderflow-chart-drawings')!);
+        expect(nativeAfter).toBe(nativeBefore);
+        expect(JSON.parse(nativeAfter!).TXF).toHaveLength(1);
+        expect(JSON.parse(nativeAfter!)).not.toHaveProperty('ORDERFLOW:flow-a:TXF');
+        expect(flowSaved['ORDERFLOW:flow-a:TXF']).toHaveLength(1);
+        expect(getDrawings('ORDERFLOW:flow-a:TXF')).toHaveLength(1);
+
+        removeDrawing('ORDERFLOW:flow-a:TXF', flow!.id);
+        flushDrawingWrites();
+        expect(store.get('sj-pro-chart-drawings')).toBe(nativeBefore);
+        expect(JSON.parse(store.get('sj-pro-orderflow-chart-drawing-tombstones')!)
+            ['ORDERFLOW:flow-a:TXF'][flow!.id]).toBeDefined();
+        expect(JSON.parse(store.get('sj-pro-chart-drawing-tombstones') ?? '{}'))
+            .not.toHaveProperty('ORDERFLOW:flow-a:TXF');
+        reloadDrawingsFromStorage();
+        expect(getDrawings('TXF')).toHaveLength(1);
+        expect(getDrawings('ORDERFLOW:flow-a:TXF')).toHaveLength(0);
+    });
+
+    it('loads Flow-scoped drawings from the separate store after reload', () => {
+        addDrawing('ORDERFLOW:flow-b:TXF', 'horizontal',
+            [{ time: 3, price: 102 }], DEFAULT_DRAWING_STYLE);
+        flushDrawingWrites();
+        expect(store.get('sj-pro-chart-drawings')).toBeUndefined();
+        expect(store.get('sj-pro-orderflow-chart-drawings')).toBeTruthy();
+        reloadDrawingsFromStorage();
+        expect(getDrawings('ORDERFLOW:flow-b:TXF')).toHaveLength(1);
+        expect(getDrawings('TXF')).toHaveLength(0);
+    });
+
+    it('migrates legacy Flow records out of native storage without losing native drawings', () => {
+        const native = addDrawing('TXF', 'horizontal',
+            [{ time: 1, price: 100 }], DEFAULT_DRAWING_STYLE)!;
+        const legacyFlow = addDrawing('ORDERFLOW:flow-legacy:TXF', 'horizontal',
+            [{ time: 2, price: 101 }], DEFAULT_DRAWING_STYLE)!;
+        flushDrawingWrites();
+        store.set('sj-pro-chart-drawings', JSON.stringify({
+            TXF: [native],
+            'ORDERFLOW:flow-legacy:TXF': [legacyFlow],
+        }));
+        store.delete('sj-pro-orderflow-chart-drawings');
+        reloadDrawingsFromStorage();
+
+        expect(getDrawings('TXF').map((d) => d.id)).toEqual([native.id]);
+        expect(getDrawings('ORDERFLOW:flow-legacy:TXF').map((d) => d.id)).toEqual([legacyFlow.id]);
+
+        updateDrawing('ORDERFLOW:flow-legacy:TXF', legacyFlow.id, { name: 'migrated' });
+        flushDrawingWrites();
+
+        const nativeStore = JSON.parse(store.get('sj-pro-chart-drawings')!);
+        const flowStore = JSON.parse(store.get('sj-pro-orderflow-chart-drawings')!);
+        expect(nativeStore.TXF.map((d: { id: string }) => d.id)).toEqual([native.id]);
+        expect(nativeStore).not.toHaveProperty('ORDERFLOW:flow-legacy:TXF');
+        expect(flowStore['ORDERFLOW:flow-legacy:TXF'][0]).toMatchObject({
+            id: legacyFlow.id, name: 'migrated',
+        });
+    });
+
+    it('recovers a Flow-only abrupt-close journal without rewriting native storage', async () => {
+        addDrawing('TXF', 'horizontal', [{ time: 1, price: 100 }], DEFAULT_DRAWING_STYLE);
+        flushDrawingWrites();
+        const nativeBefore = store.get('sj-pro-chart-drawings');
+
+        addDrawing('ORDERFLOW:flow-journal:TXF', 'horizontal',
+            [{ time: 4, price: 103 }], DEFAULT_DRAWING_STYLE);
+        writeDrawingJournal();
+        const journalName = [...store.keys()].find((key) =>
+            key.startsWith('sj-pro-orderflow-chart-drawings-pending:'));
+        expect(journalName).toBeDefined();
+
+        vi.resetModules();
+        const fresh = await import('./chart-drawings');
+        fresh.__setDrawingLocksForTest(null);
+        try {
+            expect(fresh.getDrawings('ORDERFLOW:flow-journal:TXF')).toHaveLength(1);
+            fresh.flushDrawingWrites();
+            expect(store.get('sj-pro-chart-drawings')).toBe(nativeBefore);
+            expect(store.has(journalName!)).toBe(false);
+            expect(JSON.parse(store.get('sj-pro-orderflow-chart-drawings')!)
+                ['ORDERFLOW:flow-journal:TXF']).toHaveLength(1);
+        } finally { fresh.__resetDrawingsForTest(); }
+    });
+});

@@ -89,15 +89,30 @@ export function IndicatorDialog({
     onAdd,
     onClose,
     onSaveDefaults,
+    extraIndicator,
+    favoritesStorageKey,
 }: {
     instances: IndicatorInstance[];
     onAdd: (type: string) => void;
     onClose: () => void;
     onSaveDefaults?: () => void;
+    /** Isolated favorites for optional Flow chart; native default stays global. */
+    favoritesStorageKey?: string;
+    /** Only populated by the optional Flow chart extension. */
+    extraIndicator?: {
+        label: string;
+        description: string;
+        enabled: boolean;
+        onSelect: () => void;
+    };
 }) {
     const [query, setQuery] = useState('');
     const [category, setCategory] = useState<Category>('all');
-    const [favs, setFavs] = useState<Set<string>>(loadFavorites);
+    const [favs, setFavs] = useState<Set<string>>(() => {
+        if (!favoritesStorageKey) return loadFavorites();
+        try { return new Set<string>(JSON.parse(localStorage.getItem(favoritesStorageKey) ?? '[]') as string[]); }
+        catch { return new Set<string>(); }
+    });
     // null = 關閉；{ existing: null } = 建立新自訂指標
     const [editorFor, setEditorFor] = useState<{
         existing: CustomIndicator | null;
@@ -117,7 +132,10 @@ export function IndicatorDialog({
             const next = new Set(prev);
             if (next.has(type)) next.delete(type);
             else next.add(type);
-            saveFavorites(next);
+            if (favoritesStorageKey) {
+                try { localStorage.setItem(favoritesStorageKey, JSON.stringify([...next])); }
+                catch { /* Flow preference remains in memory */ }
+            } else saveFavorites(next);
             return next;
         });
     };
@@ -154,6 +172,10 @@ export function IndicatorDialog({
     const filtered = allDefs.filter((d) => matches(d) && inCategory(d));
     const overlays = filtered.filter((d) => d.category === 'overlay');
     const panes = filtered.filter((d) => d.category === 'pane');
+    const showExtra = !!extraIndicator &&
+        (category === 'all' || category === 'overlay') &&
+        (!q || `${extraIndicator.label} ${extraIndicator.description} bubble 氣泡`
+            .toLowerCase().includes(q));
 
     const renderRow = (d: IndicatorDef) => {
         const added = counts.get(d.type) ?? 0;
@@ -305,7 +327,7 @@ export function IndicatorDialog({
                         </button>
                     </div>
                     <div className={styles.list}>
-                        {filtered.length === 0 &&
+                        {filtered.length === 0 && !showExtra &&
                             (category === 'custom' && !q ? (
                                 <div className={styles.empty}>
                                     還沒有自訂指標 —
@@ -316,11 +338,33 @@ export function IndicatorDialog({
                                     沒有符合「{query}」的指標
                                 </div>
                             ))}
-                        {overlays.length > 0 && (
+                        {(overlays.length > 0 || showExtra) && (
                             <>
                                 <div className={styles.listHeader}>
                                     主圖疊加
                                 </div>
+                                {showExtra && extraIndicator && (
+                                    <button
+                                        type='button'
+                                        className={styles.row}
+                                        onClick={extraIndicator.onSelect}
+                                        aria-label={extraIndicator.label}
+                                    >
+                                        <span className={styles.rowSwatch}
+                                            style={{ background: '#ec9c4f' }} />
+                                        <span className={styles.rowMain}>
+                                            <span className={styles.rowName}>
+                                                {extraIndicator.label}
+                                            </span>
+                                            <span className={styles.rowDesc}>
+                                                {extraIndicator.description}
+                                            </span>
+                                        </span>
+                                        {extraIndicator.enabled && (
+                                            <span className={styles.rowAdded}>已啟用</span>
+                                        )}
+                                    </button>
+                                )}
                                 {overlays.map(renderRow)}
                             </>
                         )}
@@ -454,6 +498,7 @@ export function IndicatorSettingsModal({
     onRemove,
     onCommit,
     onCancel,
+    onSaveTypeDefault,
 }: {
     inst: IndicatorInstance;
     timeframes: { label: string; minutes: number }[];
@@ -461,6 +506,7 @@ export function IndicatorSettingsModal({
     onRemove: () => void;
     onCommit: () => void;
     onCancel: () => void;
+    onSaveTypeDefault?: (inst: IndicatorInstance) => void;
 }) {
     const def = DEF_BY_TYPE.get(inst.type);
     const [tab, setTab] = useState<'inputs' | 'style' | 'visibility'>(
@@ -817,7 +863,8 @@ export function IndicatorSettingsModal({
                                 <button
                                     className={styles.defaultsItem}
                                     onClick={() => {
-                                        saveTypeDefault(inst);
+                                        if (onSaveTypeDefault) onSaveTypeDefault(inst);
+                                        else saveTypeDefault(inst);
                                         setDefaultsOpen(false);
                                         setSavedTip(true);
                                         setTimeout(

@@ -3,19 +3,53 @@ node_modules/
 
 # Build output
 dist/
+dist-ssr/
+coverage/
 
-# Environment
+# Environment & Credentials
 .env
 .env.local
 .env.*.local
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.cer
+
+# Local development & test scripts (prevent leaking credentials)
+/start.bat
+/start.ps1
+/run_*.bat
+/test_*.py
+
+# Local runtime data & package manager config
+watchlists.json
+pnpm-workspace.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
 
 # Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # OS / Editor
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
+*.sw?
 
 # Tauri
 src-tauri/target/

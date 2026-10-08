@@ -409,11 +409,31 @@ export async function fetchKbars(
     }
 }
 
-export function fetchHistoryTicks(contract: ContractBase, date: string) {
-    return apiPost<HistoryTicks>('/api/v1/data/ticks', {
+export interface HistoryTicksQuery {
+    queryType?: 'AllDay' | 'RangeTime' | 'LastCount';
+    timeStart?: string;
+    timeEnd?: string;
+    lastCount?: number;
+}
+
+export function fetchHistoryTicks(
+    contract: ContractBase,
+    date: string,
+    options?: HistoryTicksQuery,
+) {
+    const body = {
         contract: marketDataContract(contract),
         date,
-    });
+        ...(options?.queryType ? { query_type: options.queryType } : {}),
+        ...(options?.timeStart ? { time_start: options.timeStart } : {}),
+        ...(options?.timeEnd ? { time_end: options.timeEnd } : {}),
+        ...(options?.lastCount !== undefined ? { last_cnt: options.lastCount } : {}),
+    };
+    // Preserve the literal two-argument legacy apiPost call. Only the new
+    // RangeTime path gets a bounded transport timeout.
+    return options?.queryType === 'RangeTime'
+        ? apiPost<HistoryTicks>('/api/v1/data/ticks', body, { timeoutMs: 45_000 })
+        : apiPost<HistoryTicks>('/api/v1/data/ticks', body);
 }
 
 export function fetchLastTicks(
