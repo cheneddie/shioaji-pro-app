@@ -4,6 +4,8 @@ import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { ContractInfo } from '../../../lib/types/contract';
 import type { ChartColors } from '../../../lib/theme-store';
+import { bandTickFor, prefetchTickBands, useTickBandsVersion } from '../../../lib/tick-bands';
+import { tickSizeFor } from '../../../lib/utils/ticksize';
 import {
     aggregateRangeVolumeProfile, mergeProfileHistoryAndLive,
     normalizeVolumeProfileDrawings, profileDateRange,
@@ -83,6 +85,13 @@ export function OrderFlowVolumeProfileDrawingLayer({
     colors: ChartColors;
 }) {
     const storageKey = drawingStorageKey(panelId, contract, runtimeSession);
+    const tickBandsVersion = useTickBandsVersion();
+    useEffect(() => {
+        if ((contract.security_type === 'FUT' || contract.security_type === 'OPT') &&
+            contract.tick_rule) {
+            prefetchTickBands(contract.tick_rule, contract.security_type);
+        }
+    }, [contract.security_type, contract.tick_rule]);
     const [saved, setSaved] = useState<StoredDrawings>(() => ({
         key: storageKey, drawings: loadDrawings(storageKey),
     }));
@@ -209,16 +218,35 @@ export function OrderFlowVolumeProfileDrawingLayer({
         };
     }, [dataKey]);
 
-    const hasTickSize = typeof contract.tick === 'number' &&
-        Number.isFinite(contract.tick) && contract.tick > 0;
+    const isDerivative = contract.security_type === 'FUT' ||
+        contract.security_type === 'OPT';
+    const hasTickSize = !isDerivative || Boolean(contract.tick_rule) ||
+        (typeof contract.tick === 'number' &&
+            Number.isFinite(contract.tick) && contract.tick > 0);
     const ready = data.key === dataKey && data.status === 'ready' && hasTickSize;
     const profiles = useMemo(
-        () => ready ? drawings.map((drawing) => ({
-            drawing, profile: aggregateRangeVolumeProfile(
-                data.trades, drawing, contract.tick ?? 0,
-            ),
-        })) : [],
-        [drawings, data, ready, contract.tick],
+        () => ready ? drawings.map((drawing) => {
+            let missingTickMetadata = false;
+            const profile = aggregateRangeVolumeProfile(
+                data.trades, drawing, (price) => {
+                    const tick = isDerivative
+                        ? contract.tick_rule
+                            ? bandTickFor(contract.tick_rule, price) ?? NaN
+                            : contract.tick ?? NaN
+                        : tickSizeFor(contract, price);
+                    if (!Number.isFinite(tick) || tick <= 0) {
+                        missingTickMetadata = true;
+                    }
+                    return tick;
+                },
+            );
+            return { drawing, profile, missingTickMetadata };
+        }) : [],
+        [
+            drawings, data, ready, contract.tick, contract.tick_rule,
+            contract.code, contract.security_type, isDerivative,
+            tickBandsVersion,
+        ],
     );
 
     // Two chart clicks create a drawing; both anchors are candle-label times.
@@ -451,8 +479,10 @@ export function OrderFlowVolumeProfileDrawingLayer({
                             </select>
                         </label>
                         <span>{ready
-                            ? profiles.every((item) => item.profile === null)
-                                ? '選取區間無成交' : 'VP 已載入'
+                            ? profiles.some((item) => item.missingTickMetadata)
+                                ? 'VP 價格級距尚未就緒'
+                                : profiles.every((item) => item.profile === null)
+                                    ? '選取區間無成交' : 'VP 已載入'
                             : data.key === dataKey && data.status === 'error'
                                 ? (data.error ?? '歷史不完整')
                                 : data.key === dataKey && data.status === 'ready' && !hasTickSize

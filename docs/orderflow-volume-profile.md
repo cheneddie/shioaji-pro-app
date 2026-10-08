@@ -36,7 +36,7 @@ Historical range selection may span several Taiwan-local dates. Missing history 
 
 - `tick_type = 1` = buy; `2` = sell; other = neutral.
 - Ignore simulated/odd-lot, zero-volume and invalid-priced events.
-- Aggregate by normalized tick-size index; all three sides contribute to **total**.
+- Aggregate with the **tick size at each executed price**, not just `contract.tick` at reference price. For FUT/OPT with `tick_rule`, reuse the authoritative cached server tick bands via `bandTickFor()`; for non-derivatives use existing market tick rules. If a selected price band is unavailable, do not publish a partial POC. All three sides contribute to **total**.
 - POC = highest-total-volume level, breaking ties in favor of higher price.
 - Value area = 70% of total. Start from POC, expand to next-volume-heaviest neighboring level. Ties expand upward first.
 - POC, VAH, VAL never claim to represent a range when any requested historical date failed to load.
@@ -57,3 +57,5 @@ Historical range selection may span several Taiwan-local dates. Missing history 
 - Native app live-SSE login and Windows desktop runtime require separate on-device QA; frontend CI does not prove a working broker connection.
 
 - Missing or invalid instrument tick size disables VP computation explicitly instead of silently assuming a tick interval.
+
+- Price-banded FUT/OPT profiles display `VP 價格級距尚未就緒` while server-authoritative tick bands are unavailable; they never silently fall back to a single reference-price tick size.

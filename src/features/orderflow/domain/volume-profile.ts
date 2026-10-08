@@ -147,24 +147,36 @@ export function normalizeVolumeProfileDrawings(
 export function aggregateRangeVolumeProfile(
     trades: readonly VolumeProfileTrade[],
     drawing: VolumeProfileDrawing,
-    tickSize: number,
+    tickSize: number | ((price: number) => number),
 ): RangeVolumeProfile | null {
-    if (!Number.isFinite(tickSize) || tickSize <= 0) return null;
-    const decimals = Math.min(10,
-        (String(tickSize).split('.')[1] ?? '').length);
+    // A futures/options contract may use different price increments at
+    // different traded-price bands. Never infer the entire range from a
+    // single contract.tick (often only valid at the reference price).
+    const tickAt = typeof tickSize === 'function'
+        ? tickSize : () => tickSize;
+    if (typeof tickSize !== 'function' &&
+        (!Number.isFinite(tickSize) || tickSize <= 0)) return null;
     const rows = new Map<number, VolumeProfileLevel>();
     for (const trade of trades) {
         if (trade.barTime < drawing.fromTime || trade.barTime > drawing.toTime ||
             !Number.isFinite(trade.price) || !Number.isFinite(trade.volume) ||
             trade.volume <= 0) continue;
-        const bucket = Math.round(trade.price / tickSize);
-        const price = Number((bucket * tickSize).toFixed(decimals));
-        const level = rows.get(bucket) ?? {
+        const tick = tickAt(trade.price);
+        // Missing/invalid metadata must fail closed, rather than silently
+        // merging unrelated executed prices into one bucket.
+        if (!Number.isFinite(tick) || tick <= 0) return null;
+        const decimals = Math.min(10,
+            (String(tick).split('.')[1] ?? '').length);
+        const bucket = Math.round(trade.price / tick);
+        const price = Number((bucket * tick).toFixed(decimals));
+        // A numeric-price key remains unique across adjacent tick bands;
+        // the integer bucket index alone does NOT.
+        const level = rows.get(price) ?? {
             price, buy: 0, sell: 0, neutral: 0, total: 0,
         };
         level[trade.side] += trade.volume;
         level.total += trade.volume;
-        rows.set(bucket, level);
+        rows.set(price, level);
     }
     const levels = [...rows.values()].sort((a, b) => a.price - b.price);
     if (!levels.length) return null;

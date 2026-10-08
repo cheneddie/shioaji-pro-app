@@ -72,4 +72,29 @@ describe('Development 6 range Volume Profile', () => {
             {id:7,fromTime:60,toTime:100},
         ])).toEqual([{id:'x',fromTime:60,toTime:120}]);
     });
+    it('resolves each executed price using its OWN exchange tick band', () => {
+        // Below 10: 0.05; 10 or above: 0.1. A reference-price-only
+        // contract.tick=0.05 would invent an illegal 10.15 bin.
+        const result = aggregateRangeVolumeProfile([
+            t(60, 9.95, 5), t(60, 10.2, 8, 'sell'),
+            t(60, 10.3, 4, 'neutral'),
+        ], range, (price) => price < 10 ? 0.05 : 0.1)!;
+        expect(result.levels.map((level) => level.price)).toEqual([
+            9.95, 10.2, 10.3,
+        ]);
+        expect(result.poc).toBe(10.2);
+        expect(result.total).toBe(17);
+    });
+    it('refuses partial profiles when any selected price band is unresolved', () => {
+        const result = aggregateRangeVolumeProfile([
+            t(60, 9.95, 5), t(60, 10.2, 8),
+        ], range, (price) => price < 10 ? 0.05 : NaN);
+        expect(result).toBeNull();
+        // Unknown prices outside the drawing are irrelevant.
+        const unaffected = aggregateRangeVolumeProfile([
+            t(60, 9.95, 5), t(300, 10.2, 8),
+        ], range, (price) => price < 10 ? 0.05 : NaN);
+        expect(unaffected?.total).toBe(5);
+    });
+
 });
