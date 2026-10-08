@@ -209,11 +209,13 @@ export function OrderFlowVolumeProfileDrawingLayer({
         };
     }, [dataKey]);
 
-    const ready = data.key === dataKey && data.status === 'ready';
+    const hasTickSize = typeof contract.tick === 'number' &&
+        Number.isFinite(contract.tick) && contract.tick > 0;
+    const ready = data.key === dataKey && data.status === 'ready' && hasTickSize;
     const profiles = useMemo(
         () => ready ? drawings.map((drawing) => ({
             drawing, profile: aggregateRangeVolumeProfile(
-                data.trades, drawing, contract.tick ?? 1,
+                data.trades, drawing, contract.tick ?? 0,
             ),
         })) : [],
         [drawings, data, ready, contract.tick],
@@ -250,6 +252,9 @@ export function OrderFlowVolumeProfileDrawingLayer({
         if (!host || !chart || !drawings.length) return;
         const onDown = (event: PointerEvent) => {
             if (active) return;
+            const target = event.target as Element | null;
+            if (typeof target?.closest === 'function' &&
+                target.closest('button, select, input')) return;
             const bounds = host.getBoundingClientRect();
             if (event.clientY - bounds.top > 24) return;
             const timeScale = chart.timeScale();
@@ -445,10 +450,14 @@ export function OrderFlowVolumeProfileDrawingLayer({
                                 )}
                             </select>
                         </label>
-                        <span>{ready ? 'VP 已載入' :
-                            (data.key === dataKey && data.status === 'error')
+                        <span>{ready
+                            ? profiles.every((item) => item.profile === null)
+                                ? '選取區間無成交' : 'VP 已載入'
+                            : data.key === dataKey && data.status === 'error'
                                 ? (data.error ?? '歷史不完整')
-                                : 'VP 載入中'}</span>
+                                : data.key === dataKey && data.status === 'ready' && !hasTickSize
+                                    ? '商品缺少最小跳動值'
+                                    : 'VP 載入中'}</span>
                         <button type='button' className={styles.actionButton}
                             onClick={() => {
                                 const chosen = selectedId && drawings.some((d) => d.id === selectedId)
@@ -459,7 +468,7 @@ export function OrderFlowVolumeProfileDrawingLayer({
                             刪除選取
                         </button>
                         <button type='button' className={styles.actionButton}
-                            onClick={() => commit([])}>
+                            onClick={() => { commit([]); setSelectedId(null); }}>
                             清除 VP
                         </button>
                     </>}

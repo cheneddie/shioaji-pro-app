@@ -55,3 +55,5 @@ Historical range selection may span several Taiwan-local dates. Missing history 
 - Date-range loading is asynchronous; the range appears before the final volume calculation. Do not interpret a loading/error drawing as complete.
 - The raw Shioaji tick stream does not expose MBO-level order identities.
 - Native app live-SSE login and Windows desktop runtime require separate on-device QA; frontend CI does not prove a working broker connection.
+
+- Missing or invalid instrument tick size disables VP computation explicitly instead of silently assuming a tick interval.

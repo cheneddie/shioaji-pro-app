@@ -172,4 +172,87 @@ describe('Dev6 isolated Order Flow Volume Profile drawing', () => {
         expect(mock.load).not.toHaveBeenCalled();
         await act(async () => view.unmount());
     });
+    it('restores drawings, drags either anchor, isolates symbols, and clears all', async () => {
+        const storage = 'sj-pro-orderflow-vp-VPTEST-TXFR1-TXFJ6-all';
+        localStorage.setItem(storage, JSON.stringify([
+            { id: 'a', fromTime: 60, toTime: 120 },
+            { id: 'b', fromTime: 200, toTime: 240 },
+        ]));
+        const renderLayer = (item: ContractInfo) => (
+            <OrderFlowVolumeProfileDrawingLayer
+                panelId='VPTEST' contract={item}
+                timeframeMinutes={5} dayOnly={false}
+                runtimeSession='all' historyRevision={0}
+                active={false} onActiveChange={vi.fn()}
+                hostRef={ref<HTMLDivElement>(host)}
+                chartRef={ref<IChartApi>(chart)}
+                candleRef={ref<ISeriesApi<'Candlestick'>>(candle)}
+                colors={colors}
+            />
+        );
+        let view!: ReactTestRenderer;
+        await act(async () => {
+            view = create(renderLayer(contract), {
+                createNodeMock: () => ({ style: {}, getContext: () => null }),
+            });
+        });
+        await flush();
+        const down = host.addEventListener.mock.calls.filter((call) =>
+            call[0] === 'pointerdown').at(-1)?.[1] as
+                ((event: Record<string, unknown>) => void);
+        expect(down).toBeTypeOf('function');
+        const event = (x: number) => ({
+            clientX: x, clientY: 5, pointerId: 1,
+            preventDefault: vi.fn(), stopPropagation: vi.fn(),
+        });
+        await act(async () => down(event(60)));
+        const move = host.addEventListener.mock.calls.filter((call) =>
+            call[0] === 'pointermove').at(-1)?.[1] as
+                ((event: Record<string, unknown>) => void);
+        await act(async () => move(event(150)));
+        expect(JSON.parse(localStorage.getItem(storage) ?? '[]')[0])
+            .toMatchObject({ fromTime: 120, toTime: 150 });
+        await act(async () => view.update(renderLayer({
+            ...contract, code: 'MXFR1',
+        })));
+        expect(view.root.findAllByType('button')).toHaveLength(0);
+        expect(JSON.parse(localStorage.getItem(storage) ?? '[]')).toHaveLength(2);
+        await act(async () => view.update(renderLayer(contract)));
+        const clear = view.root.findAllByType('button')
+            .find((button) => button.props.children === '清除 VP');
+        expect(clear).toBeDefined();
+        await act(async () => clear!.props.onClick());
+        expect(JSON.parse(localStorage.getItem(storage) ?? '[]')).toEqual([]);
+        await act(async () => view.unmount());
+    });
+
+    it('fails closed when the instrument tick size is unknown', async () => {
+        const storage = 'sj-pro-orderflow-vp-VPTEST-TXFR1-TXFJ6-all';
+        localStorage.setItem(storage, JSON.stringify([
+            { id: 'a', fromTime: 60, toTime: 120 },
+        ]));
+        let view!: ReactTestRenderer;
+        await act(async () => {
+            view = create(
+                <OrderFlowVolumeProfileDrawingLayer
+                    panelId='VPTEST'
+                    contract={{ ...contract, tick: undefined }}
+                    timeframeMinutes={5} dayOnly={false}
+                    runtimeSession='all' historyRevision={0}
+                    active={false} onActiveChange={vi.fn()}
+                    hostRef={ref<HTMLDivElement>(host)}
+                    chartRef={ref<IChartApi>(chart)}
+                    candleRef={ref<ISeriesApi<'Candlestick'>>(candle)}
+                    colors={colors}
+                />,
+                { createNodeMock: () => ({ style: {}, getContext: () => null }) },
+            );
+        });
+        await flush();
+        expect(view.root.findAllByType('span')
+            .map((span) => span.props.children))
+            .toContain('商品缺少最小跳動值');
+        await act(async () => view.unmount());
+    });
+
 });
