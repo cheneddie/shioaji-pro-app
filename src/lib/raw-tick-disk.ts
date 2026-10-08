@@ -91,7 +91,7 @@ async function prune(): Promise<void> {
             cursorReq.onsuccess = () => {
                 const cursor = cursorReq.result;
                 if (!cursor) return;
-                if (cursor.key <= cutoff || excess > 0) {
+                if ((typeof cursor.key === 'number' && cursor.key <= cutoff) || excess > 0) {
                     cursor.delete();
                     excess = Math.max(0, excess - 1);
                     cursor.continue();
