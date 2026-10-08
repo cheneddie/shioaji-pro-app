@@ -318,6 +318,11 @@ export function FootprintPanel({
         ].join('|');
         let cancelled = false;
 
+        // StrictMode may dispose the prior runtime; resolve/release inside
+        // this effect before reading the shared Tick snapshot.
+        const runtime = getOrderFlowRuntime(contract, runtimeSession);
+        const release = runtime.retain();
+
         loadedKeyRef.current = '';
         allTradesRef.current = [];
         // Rebuild from already received physical ticks, even when the panel
@@ -345,10 +350,6 @@ export function FootprintPanel({
         setHistoryError(false);
         setCoverage('loading');
 
-        // Resolve inside the effect for the same StrictMode reason as the
-        // Development 3 K-line: cleanup can dispose the last registry runtime.
-        const runtime = getOrderFlowRuntime(contract, runtimeSession);
-        const release = runtime.retain();
         setStreamStatus(runtime.getSnapshot().health.streamStatus);
 
         const publish = () => {
