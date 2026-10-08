@@ -8,6 +8,7 @@ import type { ContractInfo } from '../../../lib/types/contract';
 import type { Trade } from '../../../lib/types/order';
 import type { Snapshot } from '../../../lib/types/market';
 import type { ChartOrderPanelState } from '../../../lib/chart-order-settings';
+import { DEF_BY_TYPE, type IndicatorInstance } from '../../../lib/indicator-defs';
 import { DEFAULT_BUBBLE_SETTINGS, normalizeBubbleSettings, type BubbleSettings } from '../domain/bubble';
 import { OrderFlowBubbleIndicator } from './order-flow-bubble-indicator';
 import { OrderFlowVolumeProfileDrawingLayer } from './order-flow-volume-profile';
@@ -20,6 +21,17 @@ const VIEWS: ReadonlyArray<{ id: OrderFlowView; label: string }> = [
     { id: 'orderflow', label: 'Flow K 線' },
     { id: 'footprint', label: 'Footprint' },
 ];
+function indicatorKey(id: string) { return `sj-pro-orderflow-indicators-${id}`; }
+function loadFlowIndicators(id: string): IndicatorInstance[] {
+    try {
+        const raw: unknown = JSON.parse(localStorage.getItem(indicatorKey(id)) ?? '[]');
+        if (!Array.isArray(raw)) return [];
+        return raw.filter((item): item is IndicatorInstance =>
+            !!item && typeof item === 'object' && typeof item.id === 'string'
+            && typeof item.type === 'string' && DEF_BY_TYPE.has(item.type)
+            && !!item.params && typeof item.params === 'object' && !Array.isArray(item.params));
+    } catch { return []; }
+}
 function viewKey(id: string) {
     return `sj-pro-orderflow-view-${id}`;
 }
@@ -70,6 +82,12 @@ export function OrderFlowWorkspacePanel({
     const [bubbleSettings, setBubbleSettings] = useState<BubbleSettings>(
         () => loadBubble(panelId),
     );
+    const [flowIndicators, setFlowIndicators] = useState<IndicatorInstance[]>(() => loadFlowIndicators(panelId));
+    const updateFlowIndicators = (next: IndicatorInstance[]) => {
+        setFlowIndicators(next);
+        try { localStorage.setItem(indicatorKey(panelId), JSON.stringify(next)); }
+        catch { /* keep isolated state in memory */ }
+    };
     const [bubbleDialogOpen, setBubbleDialogOpen] = useState(false);
     const [vpDrawingActive, setVpDrawingActive] = useState(false);
     useEffect(() => {
@@ -86,6 +104,8 @@ export function OrderFlowWorkspacePanel({
     };
 
     const extension: CandleChartExtension = {
+        storageScope: panelId,
+        indicatorInstances: { instances: flowIndicators, onChange: updateFlowIndicators },
         indicator: {
             label: 'Order Flow 成交氣泡',
             description: '買賣主動成交 Bubble · 累積 Delta / 單筆 / N 秒模式',

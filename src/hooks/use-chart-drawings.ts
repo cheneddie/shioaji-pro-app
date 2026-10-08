@@ -262,6 +262,8 @@ export function useChartDrawings(opts: {
     contract: ContractBase;
     // 週期／交易時段等會替換投影資料的 context。
     contextKey?: string;
+    /** Flow-only namespace for object identities and drawing settings. */
+    storageScopeKey?: string;
     hostRef: React.RefObject<HTMLDivElement | null>;
     chartRef: React.RefObject<IChartApi | null>;
     seriesRef: React.RefObject<ISeriesApi<'Candlestick'> | null>;
@@ -287,8 +289,27 @@ export function useChartDrawings(opts: {
     const { contract, hostRef, chartRef, seriesRef, getTimes, tradeArmed } = opts;
     const themeMode = opts.themeMode ?? 'dark';
 
-    const settings = useDrawingSettings();
-    const symbolKey = drawingSymbolKey(contract, settings.shareContinuousMonth);
+    const nativeSettings = useDrawingSettings();
+    const scope = opts.storageScopeKey;
+    const [scopedSettings, setScopedSettings] = useState<DrawingSettings>(() => {
+        if (!scope) return nativeSettings;
+        try {
+            const raw = JSON.parse(localStorage.getItem(`sj-pro-orderflow-drawing-settings-${scope}`) ?? 'null') as Partial<DrawingSettings> | null;
+            return raw && typeof raw === 'object' ? { ...nativeSettings, ...raw } : nativeSettings;
+        } catch { return nativeSettings; }
+    });
+    const settings = scope ? scopedSettings : nativeSettings;
+    const baseSymbolKey = drawingSymbolKey(contract, settings.shareContinuousMonth);
+    const symbolKey = scope ? `ORDERFLOW:${scope}:${baseSymbolKey}` : baseSymbolKey;
+    const saveSettings = useCallback((patch: Partial<DrawingSettings>) => {
+        if (!scope) { saveDrawingSettings(patch); return; }
+        setScopedSettings((current) => {
+            const next = { ...current, ...patch };
+            try { localStorage.setItem(`sj-pro-orderflow-drawing-settings-${scope}`, JSON.stringify(next)); }
+            catch { /* retain scoped in-memory preference */ }
+            return next;
+        });
+    }, [scope]);
     const contextKey = `${contract.security_type}:${contract.code}:${symbolKey}:${opts.contextKey ?? ''}`;
     const drawings = useDrawings(symbolKey);
     const [tool, setTool] = useState<DrawingToolId | null>(null);
@@ -365,8 +386,8 @@ export function useChartDrawings(opts: {
     // 設定與物件交易各有單一入口，程式呼叫也一律使武裝序號失效。
     const setDrawingSettings = useCallback((patch: Partial<DrawingSettings>) => {
         enterDrawingMode();
-        saveDrawingSettings(patch);
-    }, [enterDrawingMode]);
+        saveSettings(patch);
+    }, [enterDrawingMode, saveSettings]);
 
     // ── 復原 ─────────────────────────────────────────────────────────
     const bumpHistory = useCallback(() => setHistoryVer((v) => v + 1), []);
@@ -1181,7 +1202,7 @@ export function useChartDrawings(opts: {
                 claimKeyboard(token);
                 const group = toolDef(t).group;
                 const last = stateRef.current.settings.groupLast;
-                if (last[group] !== t) saveDrawingSettings({ groupLast: { ...last, [group]: t } });
+                if (last[group] !== t) saveSettings({ groupLast: { ...last, [group]: t } });
             }
             setTool(t);
             stateRef.current.tool = t;

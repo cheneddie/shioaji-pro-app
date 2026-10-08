@@ -166,6 +166,12 @@ export type { ChartSessionMode };
  * by CandleChart; the extension can only render additional analysis overlays.
  */
 export interface CandleChartExtension {
+    /** Optional per-Flow-chart localStorage scope; native chart passes nothing. */
+    storageScope?: string;
+    indicatorInstances?: {
+        instances: IndicatorInstance[];
+        onChange: (next: IndicatorInstance[]) => void;
+    };
     indicator?: {
         label: string;
         description: string;
@@ -273,8 +279,20 @@ export function CandleChart({
     // 沒有自訂過的市場用「設為預設」的值 — 圖表建立時就對股票與期貨兩種
     // 市場各取一份快照，之後別的圖按「設為預設」不會改到這張圖（包括它之後
     // 才切到的市場）；這張圖自己的「設為預設」才更新快照（#204）
+    const storageScope = extension?.storageScope;
+    const flowOrderDefaultsKey = storageScope ? `sj-pro-orderflow-order-defaults-${storageScope}` : null;
+    const readOrderDefault = (market: ChartOrderMarket): ChartOrderSettings => {
+        const fallback = loadChartOrderDefault(market);
+        if (!flowOrderDefaultsKey) return fallback;
+        try {
+            const saved = JSON.parse(localStorage.getItem(flowOrderDefaultsKey) ?? '{}') as Record<string, unknown>;
+            const value = saved[market];
+            return value && typeof value === 'object'
+                ? normalizeChartOrder(value as Partial<ChartOrderSettings>, market) : fallback;
+        } catch { return fallback; }
+    };
     const defaultSnapshot = useRef<Record<ChartOrderMarket, ChartOrderSettings> | null>(null);
-    defaultSnapshot.current ??= { S: loadChartOrderDefault('S'), F: loadChartOrderDefault('F') };
+    defaultSnapshot.current ??= { S: readOrderDefault('S'), F: readOrderDefault('F') };
     const defaultFor = (m: ChartOrderMarket) => defaultSnapshot.current![m];
     const savedOrder = panelOrder[orderMarket ?? 'S'];
     const marketSettings: ChartOrderSettings = useMemo(() => {
@@ -285,9 +303,17 @@ export function CandleChart({
     }, [savedOrder, orderMarket]);
     const lotPreferences = useRef(new Map<string, ChartOrderSettings['lot']>());
     const stockSettingsFor = (initial: boolean, previous?: ChartOrderSettings) => {
-        const lot = lotPreferences.current.get(contract.code) ?? loadOrderLotPreference(
-            'chart', contract, QUICK_ORDER_LOTS, initial ? marketSettings.lot : defaultFor('S').lot,
-        );
+        const fallback = initial ? marketSettings.lot : defaultFor('S').lot;
+        const localFlowLot = (() => {
+            if (!storageScope || contract.security_type !== 'STK') return null;
+            try {
+                const value = localStorage.getItem(`sj-pro-orderflow-lot-${storageScope}-${contract.code}`);
+                return value === 'Common' || value === 'IntradayOdd' ? value : null;
+            } catch { return null; }
+        })();
+        const lot = lotPreferences.current.get(contract.code) ?? (storageScope
+            ? (localFlowLot ?? fallback)
+            : loadOrderLotPreference('chart', contract, QUICK_ORDER_LOTS, fallback));
         // 換商品不沿用上一檔的單位；股數不能成為張數，零股換檔也歸 1。
         const reset = lot !== marketSettings.lot || (previous && (previous.lot !== lot || previous.lot === 'IntradayOdd'));
         return normalizeChartOrder({ ...marketSettings, lot, ...(reset ? { qty: 1 } : {}) }, 'S');
@@ -313,7 +339,10 @@ export function CandleChart({
         const settings = normalizeChartOrder({ ...next, ...(next.lot !== orderSettings.lot ? { qty: 1 } : {}) }, orderMarket);
         if (orderMarket === 'S') {
             lotPreferences.current.set(contract.code, settings.lot);
-            saveOrderLotPreference('chart', contract, settings.lot);
+            if (storageScope) {
+                try { localStorage.setItem(`sj-pro-orderflow-lot-${storageScope}-${contract.code}`, settings.lot); }
+                catch { /* Flow preference remains in memory */ }
+            } else saveOrderLotPreference('chart', contract, settings.lot);
             setStockOrder({ code: contract.code, source: savedOrder, settings });
         }
         const value = { ...panelOrder, [orderMarket]: settings };
@@ -347,15 +376,15 @@ export function CandleChart({
         }
     }, [isCombo, mode]);
     const [legacyInstances, setInstances] =
-        useState<IndicatorInstance[]>(loadInstances);
+        useState<IndicatorInstance[]>(() => extension?.indicatorInstances ? [] : loadInstances());
     const service = useContext(IndicatorInstanceContext);
-    const panelService = panelId ? service : null;
+    const panelService = extension?.indicatorInstances ? null : (panelId ? service : null);
     const panelState = useSyncExternalStore(
         panelService?.subscribe ?? (() => () => {}),
         () => panelService && panelId ? panelService.snapshot(panelId) : null,
     );
     useEffect(() => panelService && panelId ? panelService.registerPanel(panelId) : undefined, [panelService, panelId]);
-    const savedInstances = panelState?.instances ?? legacyInstances;
+    const savedInstances = extension?.indicatorInstances?.instances ?? panelState?.instances ?? legacyInstances;
     const [settingsDraft, setSettingsDraft] = useState<IndicatorInstance | null>(null);
     const settingsRevisionRef = useRef('');
     const settingsNewRef = useRef(false);
@@ -1260,6 +1289,7 @@ export function CandleChart({
     }, [dataVersion, instancesKey, themeKey, tf.minutes, customVer]);
 
     const commitInstances = (list: IndicatorInstance[]) => {
+        if (extension?.indicatorInstances) { extension.indicatorInstances.onChange(list); return; }
         if (panelService && panelId && panelState) {
             try { panelService.replace(panelId, list, panelState.revision); }
             catch (e) { notify({ kind: 'err', title: '指標設定未儲存', body: e instanceof Error ? e.message : String(e) }); }
@@ -1327,7 +1357,8 @@ export function CandleChart({
         const list = settingsNewRef.current ? [...savedInstances, settingsDraft]
             : savedInstances.map(i => i.id === settingsDraft.id ? settingsDraft : i);
         try {
-            if (panelService && panelId) panelService.replace(panelId, list, settingsRevisionRef.current);
+            if (extension?.indicatorInstances) extension.indicatorInstances.onChange(list);
+            else if (panelService && panelId) panelService.replace(panelId, list, settingsRevisionRef.current);
             else commitInstances(list);
             cancelSettings();
         } catch (e) {
@@ -1582,6 +1613,7 @@ export function CandleChart({
     }, [dataVersion]);
     const drawings = useChartDrawings({
         contract,
+        storageScopeKey: storageScope,
         contextKey: `${tf.minutes}:${dayOnly}:${historySeq}`,
         hostRef,
         chartRef,
@@ -1939,7 +1971,12 @@ export function CandleChart({
                         settings={orderSettings}
                         onChange={setOrderSettings}
                         onSaveDefault={() => {
-                            saveChartOrderDefault(orderMarket, orderSettings);
+                            if (flowOrderDefaultsKey) {
+                                try {
+                                    const saved = JSON.parse(localStorage.getItem(flowOrderDefaultsKey) ?? '{}') as Record<string, unknown>;
+                                    localStorage.setItem(flowOrderDefaultsKey, JSON.stringify({ ...saved, [orderMarket]: orderSettings }));
+                                } catch { /* scoped Flow default stays in memory */ }
+                            } else saveChartOrderDefault(orderMarket, orderSettings);
                             defaultSnapshot.current![orderMarket] = orderSettings;
                             notify({ kind: 'info', title: '已設為圖表下單預設', body: `新開的${orderMarket === 'F' ? '期貨' : '股票'}圖表使用這組設定（不含帳號）；其他現有圖表維持原設定。` });
                         }}
@@ -1985,7 +2022,7 @@ export function CandleChart({
                                 extension.indicator!.onSelect();
                             },
                         }}
-                        onSaveDefaults={panelService ? () => {
+                        onSaveDefaults={panelService && !storageScope ? () => {
                             saveInstances(savedInstances);
                             notify({ kind: 'info', title: '已儲存指標預設', body: '新圖與回測圖表使用此設定；其他現有面板維持原設定。' });
                         } : undefined}
