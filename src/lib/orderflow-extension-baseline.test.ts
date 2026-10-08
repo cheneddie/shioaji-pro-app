@@ -44,10 +44,15 @@ describe('Order Flow extension native-panel baseline', () => {
             new URL('../features/orderflow/components/order-flow-workspace-panel.tsx', import.meta.url),
             'utf8',
         );
-        expect(switcher).toContain('<OrderFlowKlinePanel');
+        // Dev8.1: Flow K-line now uses the native chart's verified tools
+        // with opt-in isolated Flow overlays, not three mutually-exclusive tabs.
         expect(switcher).toContain('<FootprintPanel');
         expect(switcher).toContain('<CandleChart');
-        expect(switcher).toContain("view === 'native'");
+        expect(switcher).toContain('extension={extension}');
+        expect(switcher).toContain('OrderFlowBubbleIndicator');
+        expect(switcher).toContain('OrderFlowVolumeProfileDrawingLayer');
+        expect(switcher).toContain("view === 'orderflow'");
+        expect(switcher).not.toContain("view === 'native'");
         expect(BLOCK_META.footprint).toMatchObject({
             category: 'market',
             pinnable: true,
@@ -58,6 +63,25 @@ describe('Order Flow extension native-panel baseline', () => {
             category: 'market', pinnable: true, singleton: false,
         });
         expect(switchCaseBody('flowladder')).toContain('<FlowLadderPanel');
+    });
+
+    it('does not add native chart execution features to Footprint or Flow DOM', () => {
+        const workspace = readFileSync(
+            new URL('../features/orderflow/components/order-flow-workspace-panel.tsx', import.meta.url), 'utf8',
+        );
+        const native = readFileSync(new URL('../components/candle-chart.tsx', import.meta.url), 'utf8');
+        expect(workspace).toContain('extension={extension}');
+        expect(native).toContain('if (extensionRef.current?.drawing?.active) return;');
+        expect(native).toContain('if (next !== \'observe\' && extensionRef.current?.drawing?.active)');
+        expect(switchCaseBody('chart')).not.toContain('extension=');
+        const footprint = readFileSync(
+            new URL('../features/orderflow/components/footprint-panel.tsx', import.meta.url), 'utf8',
+        );
+        const dom = readFileSync(
+            new URL('../features/orderflow/components/flow-ladder-panel.tsx', import.meta.url), 'utf8',
+        );
+        expect(footprint).not.toContain('placeQuickOrder');
+        expect(dom).not.toContain('placeQuickOrder');
     });
 
     it('keeps Footprint isolated from native panels and direct market subscriptions', () => {

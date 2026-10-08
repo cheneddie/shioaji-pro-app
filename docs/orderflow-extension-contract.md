@@ -174,3 +174,38 @@ native chart rules.
   original `chart` block's panel-local settings.
 - The native and Order Flow charts are **alternative modes**, not simultaneously
   mounted charts; mixing their private chart API handles is prohibited.
+
+## Development 8.1: explicitly requested unified Flow chart exception
+
+The user explicitly superseded the Development 8 alternate-mode limitation:
+the `orderflow_kline` panel must show **all native chart tools and trade
+controls on the same chart surface** as its Order Flow Bubble and Volume
+Profile overlays, and Bubble must be discoverable from the indicator picker.
+
+Architecture decision: reuse **the native CandleChart component and existing
+order execution, position/account checks, indicator and drawing engines**
+rather than clone its market-order/trigger handlers or ship a second 2,000-line
+chart fork. The native `chart` block remains behaviorally unchanged because
+the new `CandleChartExtension` prop is strictly opt-in and never supplied by
+native routes. The native indicator picker accepts an optional Flow-specific
+catalog entry, without registering Bubble in the native OHLC indicator registry.
+
+This is a **limited reviewed exception** to sections 3, 4, and 8 above:
+- Additive extension slots in `src/components/candle-chart.tsx` and
+  `src/components/indicator-dialog.tsx` are allowed; no native trade/
+  account/confirmation handler duplication or replacement.
+- The Flow panel's explicit trade toolbar is the *existing* CandleChart
+  trading UI and is intentionally capable of live orders. It must retain
+  all existing broker/account protection and confirmation behavior.
+- While Order Flow VP anchors are being placed, native chart clicks
+  **must not submit orders**. Selecting native trade/drawing mode must
+  disarm VP, and VP edge drags must be blocked while native tools are armed.
+- All Flow Bubble configuration persists under `sj-pro-orderflow-*`
+  rather than `IndicatorInstanceService` or native indicator registry.
+  Flow VP drawings remain in their original isolated namespace.
+- `footprint` and `flowladder` stay fully read-only.
+- An isolated regression test must confirm the original `chart` route
+  receives no extension prop. All native 5-panel tests remain active.
+
+This is not authorization for Flow Ladder order entry or native panel
+refactoring, and does not bypass live-trade sandbox/confirmation protections.

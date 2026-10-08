@@ -68,7 +68,7 @@ function normalizedDrawing(
 
 export function OrderFlowVolumeProfileDrawingLayer({
     panelId, contract, timeframeMinutes, dayOnly, runtimeSession,
-    historyRevision, active, onActiveChange,
+    historyRevision, active, interactionLocked = false, onActiveChange,
     hostRef, chartRef, candleRef, colors,
 }: {
     panelId: string;
@@ -78,6 +78,8 @@ export function OrderFlowVolumeProfileDrawingLayer({
     runtimeSession: 'all' | 'day' | 'night';
     historyRevision: number;
     active: boolean;
+    /** Block VP edge drags while the native chart is armed for trading/drawing. */
+    interactionLocked?: boolean;
     onActiveChange: (active: boolean) => void;
     hostRef: RefObject<HTMLDivElement | null>;
     chartRef: RefObject<IChartApi | null>;
@@ -279,7 +281,7 @@ export function OrderFlowVolumeProfileDrawingLayer({
         const chart = chartRef.current;
         if (!host || !chart || !drawings.length) return;
         const onDown = (event: PointerEvent) => {
-            if (active) return;
+            if (active || interactionLocked) return;
             const target = event.target as Element | null;
             if (typeof target?.closest === 'function' &&
                 target.closest('button, select, input')) return;
@@ -333,7 +335,7 @@ export function OrderFlowVolumeProfileDrawingLayer({
             host.removeEventListener('pointerup', onUp, true);
             host.removeEventListener('pointercancel', onUp, true);
         };
-    }, [drawings, active, storageKey]);
+    }, [drawings, active, interactionLocked, storageKey]);
 
     useEffect(() => {
         const host = hostRef.current;
