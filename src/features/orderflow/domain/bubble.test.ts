@@ -10,6 +10,7 @@ import {
     bubbleScaleReferences,
     selectVisibleBubbleCandidates,
     bubbleTradeFromHistory,
+    bubbleTradeFromRaw,
     hitTestBubble,
     mergeBubbleHistoryAndPending,
     normalizeBubbleSettings,
@@ -207,6 +208,46 @@ describe('Bubble projection and merge', () => {
         );
         expect(buy?.side).toBe('buy');
         expect(neutral).toBeNull();
+    });
+
+    it('preserves millisecond event time for live/history handoff keys', () => {
+        const raw = bubbleTradeFromRaw(
+            {
+                code: 'TXFR1',
+                date: '2026/10/08',
+                time: '09:00:01.125',
+                price: 100,
+                volume: 3,
+                totalVolume: 3,
+                tickType: 1,
+                simtrade: false,
+                intradayOdd: false,
+                raw: {} as never,
+            },
+            1,
+            contract.security_type,
+            false,
+        );
+        const historical = bubbleTradeFromHistory(
+            {
+                datetime: '2026-10-08 09:00:01.125',
+                eventTimeMs: Date.UTC(2026, 9, 8, 9, 0, 1, 125),
+                price: 100,
+                volume: 3,
+                tickType: 1,
+                side: 'buy',
+            },
+            1,
+            contract.security_type,
+            false,
+        );
+        expect(raw).toEqual(historical);
+        expect(
+            mergeBubbleHistoryAndPending(
+                [historical!],
+                [raw!],
+            ),
+        ).toHaveLength(1);
     });
 
     it('dedupes history/live handoff with multiplicity', () => {

@@ -4,7 +4,7 @@ import {
     isDaySessionTick,
 } from '../../../lib/intraday-session';
 import type { SecurityType } from '../../../lib/types/contract';
-import { wallClockToUtc } from '../../../lib/utils/kbars';
+import { parseExchangeEventTimeMs } from '../runtime/event-time';
 import type { OrderFlowHistoryTick } from './types';
 import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 
@@ -188,15 +188,17 @@ export function bubbleTradeFromRaw(
     }
     const side = sideOfTickType(tick.tickType);
     if (!side) return null;
-    const eventTimeSeconds = wallClockToUtc(
-        `${tick.date}T${tick.time}`,
+    const eventTimeMs = parseExchangeEventTimeMs(
+        tick.date,
+        tick.time,
     );
-    if (!Number.isFinite(eventTimeSeconds)) return null;
+    if (eventTimeMs === null) return null;
+    const eventTimeSeconds = eventTimeMs / 1_000;
     if (!allowedSession(securityType, eventTimeSeconds, dayOnly)) {
         return null;
     }
     return {
-        eventTimeMs: eventTimeSeconds * 1_000,
+        eventTimeMs,
         timestamp: candleTimestamp(
             eventTimeSeconds,
             timeframeMinutes,

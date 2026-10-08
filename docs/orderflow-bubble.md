@@ -121,3 +121,5 @@ Development 5 does not implement:
 - Bounded event retention trims in chunks of 10,000 after the 300,000-event target, preventing a full rebuild on every tick beyond the cap.
 - The earliest event-time in each charge window determines its price/candle anchor even if history or live events are ingested out of order. Equal-timestamp events preserve first-observed ordering because the wire payload does not carry a physical sequence number.
 - The overlay listens to time-range changes, candle data updates, resize, and wheel/pointer interaction, including vertical price-scale movements.
+
+- Live and historical Bubble ticks use the same millisecond-resolution exchange-time parser, preventing subsecond handoff duplication.
