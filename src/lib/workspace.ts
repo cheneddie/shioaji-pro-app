@@ -46,6 +46,9 @@ export type BlockType =
     | 'movers'
     | 'dock'
     | 'chart'
+    | 'orderflow_kline'
+    | 'footprint'
+    | 'flowladder'
     | 'intraday'
     | 'intradaywall'
     | 'depth'
@@ -117,7 +120,10 @@ export type SessionConfigPatch = Partial<
 // 開彈出視窗時把面板的時段選擇帶進 URL（session=…）
 export function popoutSessionParam(block: Block): Record<string, string> {
     const session =
-        block.type === 'chart'
+        block.type === 'chart' ||
+        block.type === 'orderflow_kline' ||
+        block.type === 'footprint' ||
+        block.type === 'flowladder'
             ? block.chartSession
             : block.type === 'intraday'
               ? block.intradaySession
@@ -214,6 +220,30 @@ export const BLOCK_META: Record<
         pinnable: true,
         singleton: false,
         defaultSize: { w: 10, h: 12, minW: 6, minH: 7 },
+    },
+    orderflow_kline: {
+        label: 'Order Flow K 線',
+        description: '逐筆 Order Flow 資料驅動的獨立分析 K 線',
+        category: 'market',
+        pinnable: true,
+        singleton: false,
+        defaultSize: { w: 10, h: 12, minW: 6, minH: 7 },
+    },
+    footprint: {
+        label: 'Footprint｜成交足跡',
+        description: '逐筆成交 Bid×Ask、Delta、POC 與 Imbalance',
+        category: 'market',
+        pinnable: true,
+        singleton: false,
+        defaultSize: { w: 10, h: 12, minW: 6, minH: 7 },
+    },
+    flowladder: {
+        label: 'Order Flow 報價',
+        description: '唯讀價格梯、五檔、300 秒主動量與啟動後累積量',
+        category: 'market',
+        pinnable: true,
+        singleton: false,
+        defaultSize: { w: 8, h: 12, minW: 5, minH: 7 },
     },
     intraday: {
         label: '當日走勢',
