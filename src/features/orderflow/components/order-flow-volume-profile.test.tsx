@@ -84,7 +84,11 @@ beforeEach(() => {
         clear: () => map.clear(),
         removeItem: (key: string) => { map.delete(key); },
     });
-    vi.stubGlobal('window', { devicePixelRatio: 1 });
+    vi.stubGlobal('window', {
+        devicePixelRatio: 1,
+        requestAnimationFrame: vi.fn(() => 1),
+        cancelAnimationFrame: vi.fn(),
+    });
     click = null;
     vi.clearAllMocks();
     mock.retain.mockImplementation(() => mock.release);
