@@ -30,8 +30,8 @@ const runtime = vi.hoisted(() => {
             earliestMs: null, latestMs: null,
         })),
         browserRecordedTicks: vi.fn(async () => ({
-            ticks: [], truncated: false, available: true,
-            earliestMs: null, latestMs: null,
+            ticks: [] as object[], truncated: false, available: true,
+            earliestMs: null as number | null, latestMs: null as number | null,
         })),
         emit(tick: unknown) { tickListener?.(tick); },
         reset() {
@@ -286,9 +286,9 @@ describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
         await act(async () => { view = create(viewComponent()); });
         await completeVisibleDebounce();
         const notice = view.root.findByProps({ role: 'status' });
-        // API gaps take precedence over range limits; completed date data
-        // must still render without being cleared by a later slice failure.
-        expect(notice.props.children).toContain('當前盤歷史 Tick 尚未發布');
+        // Three-date cap is the highest visible warning for this very broad
+        // window when the unfinished night is intentionally not broker-queried.
+        expect(notice.props.children).toContain('僅載入可視範圍最新 3 個交易日');
         expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count'])
             .toBeGreaterThan(0);
         expect(mocks.query.mock.calls.length).toBeGreaterThan(1);
