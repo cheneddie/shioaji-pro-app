@@ -86,6 +86,7 @@ export function OrderFlowBubbleIndicator({
     settingsRef.current = settings;
     const liveRef = useRef<BubbleSourceTrade[]>([]);
     const replayRef = useRef<BubbleSourceTrade[]>([]);
+    const ownerRef = useRef<BubbleSourceTrade[]>([]);
     const historyRef = useRef(new Map<string, BubbleSourceTrade[]>());
     const tradesRef = useRef<BubbleSourceTrade[]>([]);
     const aggregatorRef = useRef(new BubbleAggregator(settings));
@@ -101,7 +102,8 @@ export function OrderFlowBubbleIndicator({
     };
     const commit = (truncated: () => void) => {
         const historical = [...historyRef.current.values()].flat();
-        let merged = mergeBubbleHistoryAndPending(historical, replayRef.current);
+        const replay = mergeBubbleHistoryAndPending(replayRef.current, ownerRef.current);
+        let merged = mergeBubbleHistoryAndPending(historical, replay);
         merged = mergeBubbleHistoryAndPending(merged, liveRef.current);
         if (merged.length > MAX_TRADES) {
             // Keep newest event-time observations; never silently say complete.
@@ -142,12 +144,14 @@ export function OrderFlowBubbleIndicator({
         let blocked: 'quota' | 'unknown' | null = null;
         let quota: number | null = null;
         let truncated = false;
+        let ownerIncomplete = false;
         let inFlight = 0;
 
         generationRef.current++;
         historyRef.current.clear();
         liveRef.current = [];
         replayRef.current = [];
+        ownerRef.current = [];
         tradesRef.current = [];
         aggregatorRef.current = new BubbleAggregator(settingsRef.current);
         setCandidates([]);
@@ -169,7 +173,7 @@ export function OrderFlowBubbleIndicator({
                 omitted: currentPlan.omittedDates,
                 dates,
                 loading: inFlight, total: currentPlan.slices.length,
-                truncated, replayTruncated: replay.truncated,
+                truncated, replayTruncated: replay.truncated || ownerIncomplete,
                 unsupportedCalendar: currentPlan.unsupportedCalendar,
                 unsupportedTimeframe: currentPlan.unsupportedTimeframe,
                 activeUnverified: currentPlan.selectedDates.some(d => d >= todayTW()),
@@ -210,6 +214,8 @@ export function OrderFlowBubbleIndicator({
             );
             currentPlan = plan;
             const generation = ++generationRef.current;
+            ownerRef.current = [];
+            ownerIncomplete = false;
             dateStates.clear();
             historyRef.current.clear();
             inFlight = 0;
@@ -224,6 +230,24 @@ export function OrderFlowBubbleIndicator({
             commit(markTruncated);
             updateCoverage();
             if (plan.unsupportedCalendar || blocked) return;
+            // A follower may have opened after the main SSE window received
+            // trades. Request the owner's physical-code ring for this viewport.
+            void runtime.ownerReplayTicks(
+                Math.min(range.from, range.to) * 1000 - timeframeMinutes * 60_000,
+                Math.max(range.from, range.to) * 1000,
+            ).then(owner => {
+                if (cancelled || generation !== generationRef.current) return;
+                ownerIncomplete = owner.truncated || owner.missingOwner;
+                ownerRef.current = owner.ticks.map(raw => bubbleTradeFromRaw(
+                    raw, timeframeMinutes, contract.security_type, dayOnly,
+                )).filter((trade): trade is BubbleSourceTrade => trade !== null);
+                commit(markTruncated);
+                updateCoverage();
+            }).catch(() => {
+                if (cancelled || generation !== generationRef.current) return;
+                ownerIncomplete = true;
+                updateCoverage();
+            });
             for (const slice of plan.slices) {
                 const key = sliceId(slice);
                 dateStates.set(key, 'cancelled');
