@@ -79,6 +79,9 @@ export class OrderFlowRuntime {
         date?: string;
         error?: string;
     } = { status: 'idle' };
+    // Multiple date consumers (Bubble, Footprint, range VP) may finish
+    // out of order. Only the newest request may update the status banner.
+    private historyRequestSeq = 0;
 
     private stopTick?: () => void;
     private stopBook?: () => void;
@@ -209,6 +212,7 @@ export class OrderFlowRuntime {
             throw new Error('OrderFlowRuntime has been disposed');
         }
         const lifecycle = this.lifecycle;
+        const requestSeq = ++this.historyRequestSeq;
         this.historyState = { status: 'loading', date };
         this.invalidate();
         try {
@@ -217,13 +221,15 @@ export class OrderFlowRuntime {
                 date,
                 opts,
             );
-            if (!this.disposed && lifecycle === this.lifecycle) {
+            if (!this.disposed && lifecycle === this.lifecycle &&
+                requestSeq === this.historyRequestSeq) {
                 this.historyState = { status: 'ready', date };
                 this.invalidate();
             }
             return history;
         } catch (error) {
-            if (!this.disposed && lifecycle === this.lifecycle) {
+            if (!this.disposed && lifecycle === this.lifecycle &&
+                requestSeq === this.historyRequestSeq) {
                 this.historyState = {
                     status: 'error',
                     date,

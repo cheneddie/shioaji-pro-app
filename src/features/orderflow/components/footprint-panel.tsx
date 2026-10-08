@@ -264,7 +264,12 @@ export function FootprintPanel({
             showImbalance,
             visibleBars,
         };
-        localStorage.setItem(storageKey(panelId), JSON.stringify(prefs));
+        try {
+            localStorage.setItem(storageKey(panelId), JSON.stringify(prefs));
+        } catch {
+            // A denied/quota-exhausted browser storage must not unmount the
+            // active Footprint market-data view. Keep in-memory controls.
+        }
     }, [
         panelId,
         tfIndex,
