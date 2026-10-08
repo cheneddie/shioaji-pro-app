@@ -47,7 +47,7 @@ describe('Shioaji historical Tick optional query compatibility', () => {
             query_type: 'RangeTime',
             time_start: '15:00:00',
             time_end: '16:15:00',
-        });
+        }, { timeoutMs: 45_000 });
     });
 
     it('preserves LastCount when explicitly requested', async () => {
