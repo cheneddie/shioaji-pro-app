@@ -18,7 +18,6 @@ import {
     useThemeSettings,
 } from '../../../lib/theme-store';
 import type { ContractInfo } from '../../../lib/types/contract';
-import { snapshotRecentRawTicks } from '../../../lib/stream';
 import type { FootprintBar } from '../domain/contracts';
 import {
     FootprintAggregator,
@@ -31,7 +30,7 @@ import {
 } from '../domain/footprint';
 import { getOrderFlowRuntime } from '../runtime/order-flow-runtime';
 import { nextOrderFlowHistoryRevision } from '../runtime/order-flow-history';
-import { normalizeOrderFlowTick, type OrderFlowRawTick } from '../runtime/market-event-bridge';
+import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 import {
     orderFlowHistoryDate,
     orderFlowEventTradingDate,
@@ -324,11 +323,10 @@ export function FootprintPanel({
         // Rebuild from already received physical ticks, even when the panel
         // was closed. Snapshot happens before installing the live listener.
         // No new market-data subscription is requested by the buffer.
-        const sourceCode = (contract.target_code || contract.code).trim().toUpperCase();
-        const replay = snapshotRecentRawTicks(sourceCode);
+        const replay = runtime.bufferedTicks();
         pendingTradesRef.current = replay.ticks
             .map((raw) => footprintTradeFromRaw(
-                normalizeOrderFlowTick(raw), contract.security_type, dayOnly,
+                raw, contract.security_type, dayOnly,
             ))
             .filter((trade): trade is FootprintTrade =>
                 trade !== null && (
