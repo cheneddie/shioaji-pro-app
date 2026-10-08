@@ -1575,4 +1575,57 @@ describe('Flow drawing persistence never alters native drawing collections', () 
         expect(getDrawings('ORDERFLOW:flow-b:TXF')).toHaveLength(1);
         expect(getDrawings('TXF')).toHaveLength(0);
     });
+
+    it('migrates legacy Flow records out of native storage without losing native drawings', () => {
+        const native = addDrawing('TXF', 'horizontal',
+            [{ time: 1, price: 100 }], DEFAULT_DRAWING_STYLE)!;
+        const legacyFlow = addDrawing('ORDERFLOW:flow-legacy:TXF', 'horizontal',
+            [{ time: 2, price: 101 }], DEFAULT_DRAWING_STYLE)!;
+        flushDrawingWrites();
+        store.set('sj-pro-chart-drawings', JSON.stringify({
+            TXF: [native],
+            'ORDERFLOW:flow-legacy:TXF': [legacyFlow],
+        }));
+        store.delete('sj-pro-orderflow-chart-drawings');
+        reloadDrawingsFromStorage();
+
+        expect(getDrawings('TXF').map((d) => d.id)).toEqual([native.id]);
+        expect(getDrawings('ORDERFLOW:flow-legacy:TXF').map((d) => d.id)).toEqual([legacyFlow.id]);
+
+        updateDrawing('ORDERFLOW:flow-legacy:TXF', legacyFlow.id, { name: 'migrated' });
+        flushDrawingWrites();
+
+        const nativeStore = JSON.parse(store.get('sj-pro-chart-drawings')!);
+        const flowStore = JSON.parse(store.get('sj-pro-orderflow-chart-drawings')!);
+        expect(nativeStore.TXF.map((d: { id: string }) => d.id)).toEqual([native.id]);
+        expect(nativeStore).not.toHaveProperty('ORDERFLOW:flow-legacy:TXF');
+        expect(flowStore['ORDERFLOW:flow-legacy:TXF'][0]).toMatchObject({
+            id: legacyFlow.id, name: 'migrated',
+        });
+    });
+
+    it('recovers a Flow-only abrupt-close journal without rewriting native storage', async () => {
+        addDrawing('TXF', 'horizontal', [{ time: 1, price: 100 }], DEFAULT_DRAWING_STYLE);
+        flushDrawingWrites();
+        const nativeBefore = store.get('sj-pro-chart-drawings');
+
+        addDrawing('ORDERFLOW:flow-journal:TXF', 'horizontal',
+            [{ time: 4, price: 103 }], DEFAULT_DRAWING_STYLE);
+        writeDrawingJournal();
+        const journalName = [...store.keys()].find((key) =>
+            key.startsWith('sj-pro-orderflow-chart-drawings-pending:'));
+        expect(journalName).toBeDefined();
+
+        vi.resetModules();
+        const fresh = await import('./chart-drawings');
+        fresh.__setDrawingLocksForTest(null);
+        try {
+            expect(fresh.getDrawings('ORDERFLOW:flow-journal:TXF')).toHaveLength(1);
+            fresh.flushDrawingWrites();
+            expect(store.get('sj-pro-chart-drawings')).toBe(nativeBefore);
+            expect(store.has(journalName!)).toBe(false);
+            expect(JSON.parse(store.get('sj-pro-orderflow-chart-drawings')!)
+                ['ORDERFLOW:flow-journal:TXF']).toHaveLength(1);
+        } finally { fresh.__resetDrawingsForTest(); }
+    });
 });

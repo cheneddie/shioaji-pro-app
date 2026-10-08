@@ -6,6 +6,9 @@
 - Dev8 branch: `feat/orderflow-dev8-integration` at `c3b3faad1f797b025ac44127f72f508ed4aa275b`.
 - Inherited Dev8.1 work: `feat/orderflow-unified-chart-tools` at `1c287deef28adfec7d306a800504c68466632006` (PR #11). This branch is a descendant of Dev8. The current independent follow-up branch begins from this verified implementation, without duplicating the native chart or brokerage order pathway.
 - Working branch: `feat/orderflow-complete-trading-chart`.
+- Final integration branch: `codex/orderflow-pr12-polish`. It merges the local
+  Dev8 integration commit `aedba047` so the validated local simulation/Vite
+  support from `75806f7` is not omitted by the stacked PR #11/#12 ancestry.
 
 ## Why the Flow panel uses the native chart engine
 
@@ -45,6 +48,12 @@ windows, journal reconciliation after abrupt close, and migration from legacy
 pre-partition Flow data. Automated in-repository unit tests are necessary but do
 not substitute for multiwindow/browser tests. Flow drawing identity is per panel,
 and Flow UI settings/preferences are separate from native settings.
+
+The final integration branch adds deterministic coverage for the two storage
+recovery paths that can be exercised without a real desktop session: legacy Flow
+records are migrated out of the native envelope without losing native drawings,
+and a Flow-only abrupt-close journal is replayed without rewriting the native
+drawing key. A real two-window desktop run remains a separate acceptance gate.
 
 ## Indicator settings partition
 
