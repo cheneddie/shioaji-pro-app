@@ -78,3 +78,37 @@ describe('Dev8.1 unified Flow chart extension isolation', () => {
         await act(async () => view.unmount());
     });
 });
+
+describe('Flow native indicator storage isolation', () => {
+    it('persists indicators per Flow panel without writing native global defaults', async () => {
+        store.set('sj-pro-indicators-v2', '[{"native":"untouched"}]');
+        store.set('sj-pro-ind-defaults-v1', '{"native":"untouched"}');
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(<OrderFlowWorkspacePanel panelId='flow-isolated' contract={contract} />); });
+        let ext = mock.extension as CandleChartExtension;
+        expect(ext.storageScope).toBe('flow-isolated');
+        expect(ext.indicatorInstances?.instances).toEqual([]);
+        const indicator = { id: 'flow-indicator-1', type: 'sma', params: { period: 20 } };
+        await act(async () => { ext.indicatorInstances!.onChange([indicator as never]); });
+        ext = mock.extension as CandleChartExtension;
+        expect(ext.indicatorInstances?.instances).toEqual([indicator]);
+        expect(JSON.parse(store.get('sj-pro-orderflow-indicators-flow-isolated')!)).toEqual([indicator]);
+        expect(store.get('sj-pro-indicators-v2')).toBe('[{"native":"untouched"}]');
+        expect(store.get('sj-pro-ind-defaults-v1')).toBe('{"native":"untouched"}');
+        await act(async () => view.unmount());
+        await act(async () => { view = create(<OrderFlowWorkspacePanel panelId='flow-isolated' contract={contract} />); });
+        expect((mock.extension as CandleChartExtension).indicatorInstances?.instances).toEqual([indicator]);
+        await act(async () => view.unmount());
+    });
+
+    it('does not load native or another Flow panel indicator state', async () => {
+        const indicator = { id: 'flow-a-ind', type: 'sma', params: { period: 20 } };
+        store.set('sj-pro-orderflow-indicators-flow-a', JSON.stringify([indicator]));
+        store.set('sj-pro-indicators-v2', JSON.stringify([indicator]));
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(<OrderFlowWorkspacePanel panelId='flow-b' contract={contract} />); });
+        expect((mock.extension as CandleChartExtension).indicatorInstances?.instances).toEqual([]);
+        expect((mock.extension as CandleChartExtension).storageScope).toBe('flow-b');
+        await act(async () => view.unmount());
+    });
+});
