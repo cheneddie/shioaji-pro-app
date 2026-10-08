@@ -109,6 +109,9 @@ async function prune(): Promise<void> {
                 if (!cursor) return;
                 if ((typeof cursor.key === 'number' && cursor.key <= cutoff) || excess > 0) {
                     cursor.delete();
+                    // Eviction/retention removes recorded events. Never
+                    // advertise browser replay as an uninterrupted tape.
+                    dropped = true;
                     excess = Math.max(0, excess - 1);
                     cursor.continue();
                 }
@@ -147,7 +150,11 @@ async function flush(): Promise<void> {
             writtenSincePrune = 0;
             void prune();
         }
-        if (queue.length) scheduleFlush();
+        if (queue.length >= FLUSH_BATCH) {
+            // Drain bursts as fast as IndexedDB permits: a 250 ms wait per
+            // 500 events would throttle us to only 2,000 ticks/second.
+            void flush();
+        } else if (queue.length) scheduleFlush();
     }
 }
 
