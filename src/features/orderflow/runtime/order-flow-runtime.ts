@@ -1,6 +1,8 @@
 // src/features/orderflow/runtime/order-flow-runtime.ts
 
 import { getApiBase } from '../../../lib/runtime';
+import { readRecordedRawTicks } from '../../../lib/raw-tick-disk';
+import { fetchSidecarRecordedTicks } from './sidecar-tick-recorder';
 import { isDaySessionTick } from '../../../lib/intraday-session';
 import { retainQuote } from '../../../lib/quote-ownership';
 import {
@@ -161,6 +163,36 @@ export class OrderFlowRuntime {
      */
     async ownerReplayTicks(fromMs: number, toMs: number) {
         const replay = await requestOwnerRawTickReplay(
+            sourceCodeOf(this.contract), fromMs, toMs,
+        );
+        return {
+            ...replay,
+            ticks: replay.ticks.map(raw => ({
+                ...normalizeOrderFlowTick(raw),
+                code: this.identity.symbol,
+            })),
+        };
+    }
+
+    /** Best-effort browser-disk replay captured while an SSE owner was open.
+     * Does not prove completeness or replace a future sidecar recorder.
+     */
+    async browserRecordedTicks(fromMs: number, toMs: number) {
+        const replay = await readRecordedRawTicks(sourceCodeOf(this.contract), fromMs, toMs);
+        return {
+            ...replay,
+            ticks: replay.ticks.map(raw => ({
+                ...normalizeOrderFlowTick(raw),
+                code: this.identity.symbol,
+            })),
+        };
+    }
+
+    /** Query a native disk-backed recorder ONLY when this Sidecar advertises
+     * recorder v1. A missing endpoint or capability is never polled.
+     */
+    async sidecarRecordedTicks(fromMs: number, toMs: number) {
+        const replay = await fetchSidecarRecordedTicks(
             sourceCodeOf(this.contract), fromMs, toMs,
         );
         return {
