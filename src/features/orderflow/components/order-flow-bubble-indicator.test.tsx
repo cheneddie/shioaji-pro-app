@@ -29,6 +29,10 @@ const runtime = vi.hoisted(() => {
             ticks: [], truncated: false, missingOwner: false,
             earliestMs: null, latestMs: null,
         })),
+        browserRecordedTicks: vi.fn(async () => ({
+            ticks: [], truncated: false, available: true,
+            earliestMs: null, latestMs: null,
+        })),
         emit(tick: unknown) { tickListener?.(tick); },
         reset() {
             tickListener = null;
@@ -38,6 +42,7 @@ const runtime = vi.hoisted(() => {
             this.subscribeTicks.mockClear();
             this.loadHistory.mockReset();
             this.ownerReplayTicks.mockClear();
+            this.browserRecordedTicks.mockClear();
         },
     };
 });
@@ -107,7 +112,9 @@ function viewComponent(minutes = 1) {
 describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
     beforeEach(() => {
         vi.useFakeTimers();
-        vi.setSystemTime(new Date('2026-10-08T02:00:00Z'));
+        // Oct 9 Taiwan holiday. Oct 8 day is completed; Oct 12
+        // night-current must be served by replay/live, not history API.
+        vi.setSystemTime(new Date('2026-10-09T02:00:00Z'));
         runtime.reset();
         mocks.query.mockReset().mockImplementation(async (_contract, slice) => ({
             slice, status: 'ready', percent: 23, checkedAt: Date.now(),
@@ -192,9 +199,34 @@ describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
             for (const cb of [...listeners]) cb();
         });
         await completeVisibleDebounce();
-        expect(mocks.query.mock.calls[1]![1]).toMatchObject({
-            date: '2026-10-12', session: 'night',
+        // The same active night must not query the unpublished trading date.
+        expect(mocks.query).toHaveBeenCalledOnce();
+        expect(view.root.findByProps({ role: 'status' }).props.children)
+            .toContain('當前盤歷史 Tick 尚未發布');
+        await act(async () => view.unmount());
+    });
+    it('replays genuine browser-recorded ticks on a refreshed viewport without Tick history', async () => {
+        runtime.browserRecordedTicks.mockResolvedValueOnce({
+            ticks: [{
+                code: 'TXFR1', date: '2026/10/08', time: '15:00:02.000',
+                price: 102, volume: 7, totalVolume: 7, tickType: 1,
+                simtrade: false, intradayOdd: false, raw: {},
+            }],
+            available: true, truncated: false,
+            earliestMs: Date.UTC(2026, 9, 8, 15, 0, 2),
+            latestMs: Date.UTC(2026, 9, 8, 15, 0, 2),
         });
+        mocks.visible = {
+            from: Date.UTC(2026, 9, 8, 15, 0) / 1000,
+            to: Date.UTC(2026, 9, 8, 16, 0) / 1000,
+        };
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
+        expect(mocks.query).not.toHaveBeenCalled();
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(1);
+        expect(view.root.findByProps({ role: 'status' }).props.children)
+            .toContain('已回放本機錄製成交');
         await act(async () => view.unmount());
     });
     it('never fetches or renders partial 1D bubble data', async () => {
@@ -256,7 +288,7 @@ describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
         const notice = view.root.findByProps({ role: 'status' });
         // API gaps take precedence over range limits; completed date data
         // must still render without being cleared by a later slice failure.
-        expect(notice.props.children).toContain('DATA GAP');
+        expect(notice.props.children).toContain('當前盤歷史 Tick 尚未發布');
         expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count'])
             .toBeGreaterThan(0);
         expect(mocks.query.mock.calls.length).toBeGreaterThan(1);

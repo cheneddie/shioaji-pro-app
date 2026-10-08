@@ -37,6 +37,8 @@ type Coverage = {
     unsupportedTimeframe: boolean;
     activeUnverified: boolean;
     deferredHistory: boolean;
+    recordedCount: number;
+    recorderTruncated: boolean;
     quota: number | null;
     checkedAt: number | null;
     blocked: 'quota' | 'unknown' | null;
@@ -46,6 +48,7 @@ const initialCoverage = (): Coverage => ({
     loading: 0, total: 0, truncated: false, replayTruncated: false,
     unsupportedCalendar: false, unsupportedTimeframe: false,
     activeUnverified: false, deferredHistory: false,
+    recordedCount: 0, recorderTruncated: false,
     quota: null, checkedAt: null, blocked: null,
 });
 function coverageLabel(coverage: Coverage): string | null {
@@ -58,10 +61,12 @@ function coverageLabel(coverage: Coverage): string | null {
         return 'DATA GAP · 部分歷史成交缺失或交易日不符';
     if (coverage.omitted > 0)
         return '僅載入可視範圍最新 3 個交易日（其他 ' + coverage.omitted + ' 日未查詢）';
-    if (coverage.truncated || coverage.replayTruncated)
-        return 'DATA GAP · Tick 緩衝或畫面資料已截斷';
+    if (coverage.truncated || coverage.replayTruncated || coverage.recorderTruncated)
+        return 'DATA GAP · Tick 緩衝或回放資料已截斷';
     if (coverage.deferredHistory)
-        return '當前盤歷史 Tick 尚未發布｜使用已錄製／即時成交，開盤前可能有缺口';
+        return coverage.recordedCount > 0
+            ? '當前盤歷史 Tick 尚未發布｜已回放本機錄製成交，完整性尚未驗證'
+            : '當前盤歷史 Tick 尚未發布｜使用即時成交，開盤至開始接收前可能有缺口';
     if (coverage.activeUnverified)
         return 'Tick 完整性未驗證 · 當前盤可能仍有缺口';
     if (coverage.loading > 0)
@@ -95,6 +100,7 @@ export function OrderFlowBubbleIndicator({
     const liveRef = useRef<BubbleSourceTrade[]>([]);
     const replayRef = useRef<BubbleSourceTrade[]>([]);
     const ownerRef = useRef<BubbleSourceTrade[]>([]);
+    const recordedRef = useRef<BubbleSourceTrade[]>([]);
     const historyRef = useRef(new Map<string, BubbleSourceTrade[]>());
     const tradesRef = useRef<BubbleSourceTrade[]>([]);
     const aggregatorRef = useRef(new BubbleAggregator(settings));
@@ -111,7 +117,8 @@ export function OrderFlowBubbleIndicator({
     const commit = (truncated: () => void) => {
         const historical = [...historyRef.current.values()].flat();
         const replay = mergeBubbleHistoryAndPending(replayRef.current, ownerRef.current);
-        let merged = mergeBubbleHistoryAndPending(historical, replay);
+        const allReplays = mergeBubbleHistoryAndPending(recordedRef.current, replay);
+        let merged = mergeBubbleHistoryAndPending(historical, allReplays);
         merged = mergeBubbleHistoryAndPending(merged, liveRef.current);
         if (merged.length > MAX_TRADES) {
             // Keep newest event-time observations; never silently say complete.
@@ -154,6 +161,7 @@ export function OrderFlowBubbleIndicator({
         let checkedAt: number | null = null;
         let truncated = false;
         let ownerIncomplete = false;
+        let recorderTruncated = false;
         let inFlight = 0;
         let scheduledSignature = '';
 
@@ -162,6 +170,7 @@ export function OrderFlowBubbleIndicator({
         liveRef.current = [];
         replayRef.current = [];
         ownerRef.current = [];
+        recordedRef.current = [];
         tradesRef.current = [];
         aggregatorRef.current = new BubbleAggregator(settingsRef.current);
         setCandidates([]);
@@ -200,6 +209,8 @@ export function OrderFlowBubbleIndicator({
                 activeUnverified: currentPlan.selectedDates.some(d => d >= todayTW()),
                 deferredHistory: currentPlan.slices.some(s =>
                     dateStates.get(sliceId(s)) === 'recording'),
+                recordedCount: recordedRef.current.length,
+                recorderTruncated,
                 quota, checkedAt, blocked,
             });
         };
@@ -240,7 +251,9 @@ export function OrderFlowBubbleIndicator({
             currentPlan = plan;
             const generation = ++generationRef.current;
             ownerRef.current = [];
+            recordedRef.current = [];
             ownerIncomplete = false;
+            recorderTruncated = false;
             dateStates.clear();
             historyRef.current.clear();
             inFlight = 0;
@@ -255,6 +268,26 @@ export function OrderFlowBubbleIndicator({
             commit(markTruncated);
             updateCoverage();
             if (plan.unsupportedCalendar || blocked || plan.slices.length === 0) return;
+            // Recover genuine SSE-owner events from IndexedDB after reload.
+            // Storage never guarantees coverage: lack of a recorder while all
+            // windows were closed remains an explicit possible gap.
+            void runtime.browserRecordedTicks(
+                Math.min(...plan.slices.map(s => s.fromMs)),
+                Math.max(...plan.slices.map(s => s.toMs)),
+            ).then(recorded => {
+                if (cancelled || generation !== generationRef.current) return;
+                recorderTruncated = recorded.truncated && recorded.available;
+                recordedRef.current = recorded.ticks.map(raw => bubbleTradeFromRaw(
+                    raw, timeframeMinutes, contract.security_type, dayOnly,
+                )).filter((trade): trade is BubbleSourceTrade => trade !== null);
+                commit(markTruncated);
+                updateCoverage();
+            }).catch(() => {
+                if (cancelled || generation !== generationRef.current) return;
+                recorderTruncated = true;
+                updateCoverage();
+            });
+
             // A follower may have opened after the main SSE window received
             // trades. Request the owner's physical-code ring for this viewport.
             // Replay only the selected/latest-three slices, not the full
