@@ -154,3 +154,23 @@ Feature tests must distinguish:
 - After the active stage passes its gate, stop.
 
 Development 0 itself is baseline/documentation/regression-only. It must not register `orderflow_kline`, `footprint`, or `flowladder`.
+
+## Development 8: explicitly selected native chart mode exception
+
+At the user's request, `orderflow_kline` may offer a distinct, **explicitly selected**
+`完整 K 線` view that **mounts the existing, unmodified** `CandleChart` and
+`QuoteBoard` components. Its native order-entry UI and associated account
+risk/confirmation controls therefore remain governed by the original Shioaji
+native chart rules.
+
+- This is an opt-in reuse of the unmodified native chart, **not** a grant to
+  implement new trading buttons or routes inside Order Flow visualizations.
+- The default `Flow K 線`, `Footprint` and `flowladder` views remain read-only.
+- Never copy order-mutation logic into `src/features/orderflow/`; use native
+  `CandleChart` unchanged.
+- A user switching to native chart mode must see the explicit warning
+  `原生完整功能（含原生圖表交易操作）`.
+- Native chart mode owns a derived per-panel ID; it must not overwrite the
+  original `chart` block's panel-local settings.
+- The native and Order Flow charts are **alternative modes**, not simultaneously
+  mounted charts; mixing their private chart API handles is prohibited.

@@ -14,7 +14,7 @@ import { AsyncStatus, type AsyncPhase } from './components/async-status';
 import { CandleChart } from './components/candle-chart';
 import { FootprintPanel } from './features/orderflow/components/footprint-panel';
 import { FlowLadderPanel } from './features/orderflow/components/flow-ladder-panel';
-import { OrderFlowKlinePanel } from './features/orderflow/components/order-flow-kline-panel';
+import { OrderFlowWorkspacePanel } from './features/orderflow/components/order-flow-workspace-panel';
 import { ChipsCard } from './components/chips-card';
 import { ComboListPanel } from './components/combo-list';
 import { ComboTicket } from './components/combo-ticket';
@@ -260,9 +260,16 @@ function BlockBody({
             );
         case 'orderflow_kline':
             return contract ? (
-                <OrderFlowKlinePanel
+                <OrderFlowWorkspacePanel
                     panelId={block.id}
                     contract={contract}
+                    snapshot={snapshot}
+                    trades={dockProps.trades}
+                    onOrdersChanged={dockProps.onTradesChanged}
+                    orderSettings={block.chartOrder}
+                    onOrderSettingsChange={(chartOrder) =>
+                        onSessionConfigChange(block.id, { chartOrder })
+                    }
                     sessionMode={block.chartSession}
                     onSessionModeChange={(chartSession) =>
                         onSessionConfigChange(block.id, { chartSession })

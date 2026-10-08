@@ -23,19 +23,6 @@ import {
 } from '../domain/bubble';
 import * as styles from './order-flow-kline-panel.css';
 
-function barWidthFromCoordinates(values: number[]) {
-    const unique = [...new Set(values)]
-        .sort((a, b) => a - b);
-    const gaps: number[] = [];
-    for (let index = 1; index < unique.length; index += 1) {
-        const gap = unique[index]! - unique[index - 1]!;
-        if (gap > 0) gaps.push(gap);
-    }
-    if (gaps.length === 0) return 12;
-    gaps.sort((a, b) => a - b);
-    return gaps[Math.floor(gaps.length / 2)] ?? 12;
-}
-
 export function OrderFlowBubbleLayer({
     hostRef,
     chartRef,
@@ -117,9 +104,10 @@ export function OrderFlowBubbleLayer({
                 }
                 return [{ candidate, x, y }];
             });
-            const barWidth = barWidthFromCoordinates(
-                projected.map((item) => item.x),
-            );
+            // Use the chart's actual logical bar spacing, not gaps between
+            // sparse bubble events. Sparse events can be hours apart and must
+            // not make bubbles jump in size while zooming.
+            const barWidth = Math.max(0.25, timeScale.options().barSpacing);
             const visible = projected.map(
                 (item) => item.candidate,
             );

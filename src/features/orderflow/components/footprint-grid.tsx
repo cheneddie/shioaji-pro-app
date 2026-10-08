@@ -156,7 +156,9 @@ export function FootprintGrid({
             if (view.length === 0) return;
 
             const axisWidth = 58;
-            const timeHeight = 18;
+            // Two-row footer: exchange clock + bar Delta, as in classical
+            // Bid×Ask footprint clusters. Leave enough space at every LOD.
+            const timeHeight = 36;
             const plotTop = 4;
             const plotBottom = Math.max(plotTop + 1, height - timeHeight);
             const plotWidth = Math.max(1, width - axisWidth);
@@ -222,18 +224,53 @@ export function FootprintGrid({
                             plotBottom - (index + 1) * rowHeight;
                         const intensity =
                             level.totalVolume / maxLevelVolume;
-                        const restore = alphaFill(
-                            ctx,
-                            levelColor(level, colors),
-                            footprintHeatAlpha(intensity, opacity),
-                        );
-                        ctx.fillRect(
-                            x + 0.5,
-                            y + 0.5,
-                            Math.max(0, barWidth - 1),
-                            Math.max(0, rowHeight - 1),
-                        );
-                        restore();
+                        const cellWidth = Math.max(0, barWidth - 1);
+                        const cellHeight = Math.max(0, rowHeight - 1);
+                        if (mode === 'bidask' && lod === 'detail') {
+                            // Left = market sells hitting BID, right =
+                            // market buys lifting ASK. Never derive the
+                            // colors from candle direction or net Delta.
+                            const traded = Math.max(
+                                1, level.buyVolume + level.sellVolume,
+                            );
+                            const leftAlpha = footprintHeatAlpha(
+                                level.sellVolume / traded, opacity,
+                            );
+                            const rightAlpha = footprintHeatAlpha(
+                                level.buyVolume / traded, opacity,
+                            );
+                            const restoreSell = alphaFill(
+                                ctx, colors.down, leftAlpha,
+                            );
+                            ctx.fillRect(x + 0.5, y + 0.5,
+                                cellWidth / 2, cellHeight);
+                            restoreSell();
+                            const restoreBuy = alphaFill(
+                                ctx, colors.up, rightAlpha,
+                            );
+                            ctx.fillRect(x + 0.5 + cellWidth / 2, y + 0.5,
+                                cellWidth / 2, cellHeight);
+                            restoreBuy();
+                            ctx.strokeStyle = colors.grid;
+                            ctx.lineWidth = 0.5;
+                            ctx.beginPath();
+                            ctx.moveTo(x + barWidth / 2, y + 1);
+                            ctx.lineTo(x + barWidth / 2, y + rowHeight - 1);
+                            ctx.stroke();
+                        } else {
+                            const restore = alphaFill(
+                                ctx,
+                                levelColor(level, colors),
+                                footprintHeatAlpha(intensity, opacity),
+                            );
+                            ctx.fillRect(
+                                x + 0.5,
+                                y + 0.5,
+                                cellWidth,
+                                cellHeight,
+                            );
+                            restore();
+                        }
 
                         if (
                             showPoc &&
@@ -324,6 +361,24 @@ export function FootprintGrid({
                             );
                         }
                     }
+                    // Outline the price-body envelope without covering
+                    // either bid/ask value: a bar can still be read as a
+                    // candle while numbers remain the primary content.
+                    const highIndex = priceIndex.get(bar.high);
+                    const lowIndex = priceIndex.get(bar.low);
+                    if (lod === 'detail' &&
+                        highIndex !== undefined && lowIndex !== undefined) {
+                        const highY = plotBottom - (highIndex + 1) * rowHeight;
+                        const lowY = plotBottom - lowIndex * rowHeight;
+                        ctx.strokeStyle = bar.close >= bar.open
+                            ? colors.up : colors.down;
+                        ctx.lineWidth = 1.1;
+                        ctx.strokeRect(
+                            x + 1, highY,
+                            Math.max(0, barWidth - 2),
+                            Math.max(1, lowY - highY),
+                        );
+                    }
                     if (barIndex > 0) {
                         ctx.strokeStyle = colors.grid;
                         ctx.beginPath();
@@ -353,6 +408,12 @@ export function FootprintGrid({
                 });
             }
 
+            ctx.strokeStyle = colors.grid;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(axisWidth, plotBottom + 18);
+            ctx.lineTo(width, plotBottom + 18);
+            ctx.stroke();
             ctx.fillStyle = colors.text;
             ctx.textAlign = 'center';
             const timeEvery = Math.max(
@@ -374,8 +435,21 @@ export function FootprintGrid({
                 ctx.fillText(
                     label,
                     axisWidth + index * barWidth + barWidth / 2,
-                    plotBottom + timeHeight / 2,
+                    plotBottom + 9,
                 );
+                if (barWidth >= 32) {
+                    const delta = bar.levels.reduce(
+                        (total, level) => total + level.delta, 0,
+                    );
+                    ctx.fillStyle = delta > 0 ? colors.up
+                        : delta < 0 ? colors.down : colors.text;
+                    ctx.fillText(
+                        `Δ${delta > 0 ? '+' : ''}${formatCompact(delta)}`,
+                        axisWidth + index * barWidth + barWidth / 2,
+                        plotBottom + 27,
+                    );
+                    ctx.fillStyle = colors.text;
+                }
             });
         };
 
