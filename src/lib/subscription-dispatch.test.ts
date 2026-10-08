@@ -63,7 +63,10 @@ beforeEach(async () => {
     mode(true);
     m.nativeFetch.mockImplementation(async () => new Response('{}'));
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    release();
+    vi.unstubAllGlobals();
+});
 
 it.each(['production', 'unknown', 'roundtrip', 'removed', 'unsigned'] as const)(
     'rejects a trade subscription after %s during native module loading', async change => {
@@ -190,6 +193,14 @@ it.each([true, false])('keeps a restored protection trigger Tick subscribed as u
     m.tick!({ code: contract.code, close: 47900 });
     await vi.waitFor(() => expect(m.place).toHaveBeenCalledOnce());
     expect(m.place.mock.calls[0]![0]).toMatchObject(contract);
+    // Firing removes the trigger and releases its quote hold. Wait for the
+    // ownership queue to finish the grace-period unsubscribe so this case
+    // cannot dispatch through its old native-module mock during a later case.
+    const { RELEASE_GRACE_MS } = await import('./quote-ownership');
+    await vi.waitFor(() => expect(m.nativeFetch).toHaveBeenCalledTimes(2), {
+        timeout: RELEASE_GRACE_MS + 1000,
+    });
+    expect(m.nativeFetch.mock.calls[1]![0]).toBe('/api/v1/stream/unsubscribe');
 });
 
 it.each(['Tick', 'BidAsk', 'Quote'] as const)('subscribes and registers %s after mode discovery during native loading', async quoteType => {
