@@ -78,6 +78,12 @@ Automation:
 - `pnpm test` (including new view isolation and bubble sizing tests).
 - `pnpm run build`.
 - Keep existing native regression guard and all Dev0–Dev7 tests passing.
+- Synthetic `TickAggregator` replay of 10,000, 50,000 and 100,000
+  ordered ticks; verify buy/sell/neutral volume totals and moving
+  window reconciliation. This is **not** a browser framerate benchmark.
+- Repeated 100-cycle shared-runtime retain/release audit verifies the
+  underlying Tick/Book/status listener teardown. It is not a physical
+  React 100x mount test.
 
 Manual/live gates that cannot be certified by static CI:
 - Three independent new panels plus all native panels opened together.
