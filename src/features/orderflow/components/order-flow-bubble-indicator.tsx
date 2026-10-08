@@ -215,7 +215,11 @@ export function OrderFlowBubbleIndicator({
                     .map((tick) => bubbleTradeFromHistory(
                         tick, timeframeMinutes, contract.security_type, dayOnly,
                     ))
-                    .filter((trade): trade is BubbleSourceTrade => trade !== null);
+                    .filter((trade): trade is BubbleSourceTrade =>
+                        trade !== null &&
+                        orderFlowEventTradingDate(
+                            contract.security_type, dayOnly, trade.eventTimeMs,
+                        ) === loadDate);
                 const merged = mergeBubbleHistoryAndPending(
                     historyTrades, pendingRef.current,
                 );
