@@ -23,13 +23,37 @@ Flow-only Volume Profile drawing remains on the Flow overlay and the view switch
 4. **Stock lot preference:** The Flow lot/unit preference uses `sj-pro-orderflow-lot-{panelId}-{symbol}`; it does not write `sj-pro-order-lot-preferences`.
 5. **Existing routing:** Original `chart`, `flash`, `volprofile`, `depth`, `tape` components keep their render routing and native non-extension logic.
 
-## Open architecture risk — do not overstate isolation
+## Drawing persistence partition
 
-The original `chart-drawings.ts` library has **one process-wide shared drawing store** and currently persists its symbol-keyed object collection in `sj-pro-chart-drawings`. The Flow-scoped **symbol keys** isolate drawing *identity and visibility* from native chart drawings, but the lowest-level persisted drawing collection is still the native storage envelope.
+`chart-drawings.ts` continues to own the validated native drawing revision, history,
+journal and tombstone logic. It now partitions records by the scoped symbol prefix
+`ORDERFLOW:` at the final persistence boundary:
 
-That is **not byte-level storage separation**. A stricter requirement that the native `sj-pro-chart-drawings` localStorage value not change at all when using Flow drawing tools requires extracting a namespaced drawing store factory / storage adapter while preserving the native journal, revision, tombstone and cross-window merge algorithms. This is a separate high-risk refactor; do not claim completed until tested across multiple tabs.
+- Native objects: `sj-pro-chart-drawings`
+- Flow objects: `sj-pro-orderflow-chart-drawings`
+- Native tombstones: `sj-pro-chart-drawing-tombstones`
+- Flow tombstones: `sj-pro-orderflow-chart-drawing-tombstones`
+- Flow-only write-ahead journal: `sj-pro-orderflow-chart-drawings-pending:*`
 
-Also verify native global favorites and optional indicator type-default operations in Flow are non-mutating or explicitly split into Flow-scoped keys before final acceptance.
+The loader merges these stores for internal revision/history operations, but Flow
+records are not written into native drawing keys on a new write. Legacy Flow objects
+written into the native envelope by the previous Dev8.1 version remain readable,
+and are migrated when the drawing store next persists.
+
+**Residual gates:** verify simultaneous Flow/native drawing edits across two
+windows, journal reconciliation after abrupt close, and migration from legacy
+pre-partition Flow data. Automated in-repository unit tests are necessary but do
+not substitute for multiwindow/browser tests. Flow drawing identity is per panel,
+and Flow UI settings/preferences are separate from native settings.
+
+## Indicator settings partition
+
+- Native chart retains `sj-pro-indicators-v2`, `sj-pro-ind-defaults-v1`,
+  and native favorites.
+- Flow panel-specific instances: `sj-pro-orderflow-indicators-{panelId}`.
+- Flow indicator saved type defaults: `sj-pro-orderflow-ind-defaults-{panelId}`.
+- Flow favorites: `sj-pro-orderflow-ind-favorites-{panelId}`.
+- Flow Bubble: `sj-pro-orderflow-kline-{panelId}`.
 
 ## Required Gate
 
@@ -40,4 +64,4 @@ Also verify native global favorites and optional indicator type-default operatio
 - Verify saved Flow settings across reload + two simultaneous Flow panels and against native chart state.
 - No live orders in automated tests. Manual paper/broker UI acceptance remains necessary.
 
-**Gate policy:** red or incomplete tests means the branch is **NOT COMPLETE**. In particular, the drawing storage-envelope risk above blocks any claim of full strict storage isolation.
+**Gate policy:** red or incomplete tests means the branch is **NOT COMPLETE**. Passing automated tests verifies code contracts; live account/desktop and two-window recovery still require explicit sign-off.

@@ -283,13 +283,6 @@ function splitScope<T>(value: Record<string, T>): { native: Record<string, T>; f
     }
     return { native, flow };
 }
-/** Preserve existing serialized values when no records for that namespace exist. */
-function writeIfChanged(key: string, value: Record<string, unknown>) {
-    const raw = localStorage.getItem(key);
-    if (raw === null && Object.keys(value).length === 0) return;
-    const next = JSON.stringify(value);
-    if (raw !== next) localStorage.setItem(key, next);
-}
 
 // 每個商品鍵的上限。整份 store 是一個 localStorage 項目，無上限地長下去
 // 每次寫入與跨視窗解析都會變慢，也會吃掉其他設定的配額。
@@ -1028,11 +1021,30 @@ function writeDrawingsNow(view?: { base: Store; tombs: Tombs; journals: Journal[
     try {
         const drawingsByScope = splitScope(next);
         const tombsByScope = splitScope(tombs);
-        // Flow drawing state must never be serialized inside native chart keys.
-        writeIfChanged(STORAGE_KEY, drawingsByScope.native);
-        writeIfChanged(FLOW_STORAGE_KEY, drawingsByScope.flow);
-        writeIfChanged(TOMB_KEY, tombsByScope.native);
-        writeIfChanged(FLOW_TOMB_KEY, tombsByScope.flow);
+        // The original native implementation always writes both keys while
+        // processing a native operation. That retry/failure behavior is part
+        // of the existing undo/tombstone safety contract.
+        const touchedKeys = [
+            ...snapshot.keys(), ...orderSnap.keys(), ...restoreSnap.keys(),
+            ...journals.flatMap((j) => [
+                ...j.ops.keys(), ...j.order.keys(), ...j.restores.keys(),
+            ]),
+        ];
+        const legacyFlowEntries = Object.keys(loadStoreAt(STORAGE_KEY, tombs)).some(isFlowDrawingKey)
+            || Object.keys(loadTombsAt(TOMB_KEY)).some(isFlowDrawingKey);
+        const writeNative = touchedKeys.some((k) => !isFlowDrawingKey(k))
+            || journals.some((j) => Object.keys(j.settingRevisions).length > 0)
+            || legacyFlowEntries;
+        const writeFlow = touchedKeys.some(isFlowDrawingKey) || legacyFlowEntries;
+        // Pure Flow operations do not touch either native persisted collection.
+        if (writeNative) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(drawingsByScope.native));
+            localStorage.setItem(TOMB_KEY, JSON.stringify(tombsByScope.native));
+        }
+        if (writeFlow) {
+            localStorage.setItem(FLOW_STORAGE_KEY, JSON.stringify(drawingsByScope.flow));
+            localStorage.setItem(FLOW_TOMB_KEY, JSON.stringify(tombsByScope.flow));
+        }
         if (journalSettings) {
             localStorage.setItem(SETTINGS_KEY, serializeSettings(journalSettings));
         }
