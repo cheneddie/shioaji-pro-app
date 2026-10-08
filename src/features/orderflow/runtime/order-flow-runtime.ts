@@ -7,6 +7,7 @@ import {
     ensureStream,
     getStreamStatus,
     subscribeStatusStore,
+    snapshotRecentRawTicks,
 } from '../../../lib/stream';
 import type { ContractBase } from '../../../lib/types/contract';
 import {
@@ -23,6 +24,7 @@ import { BookAggregator } from './book-aggregator';
 import {
     subscribeOrderFlowBooks,
     subscribeOrderFlowTicks,
+    normalizeOrderFlowTick,
     type OrderFlowRawTick,
 } from './market-event-bridge';
 import { fetchOrderFlowHistory } from './order-flow-history';
@@ -133,6 +135,22 @@ export class OrderFlowRuntime {
         this.tickListeners.add(listener);
         return () => {
             this.tickListeners.delete(listener);
+        };
+    }
+
+    /**
+     * Snapshot only the actual raw ticks delivered to the shared SSE stream
+     * for this runtime's physical contract. This is NOT complete history.
+     * Panels must only read it through the runtime ownership boundary.
+     */
+    bufferedTicks(): { ticks: OrderFlowRawTick[]; truncated: boolean } {
+        const snapshot = snapshotRecentRawTicks(sourceCodeOf(this.contract));
+        return {
+            ticks: snapshot.ticks.map((raw) => ({
+                ...normalizeOrderFlowTick(raw),
+                code: this.identity.symbol,
+            })),
+            truncated: snapshot.truncated,
         };
     }
 
