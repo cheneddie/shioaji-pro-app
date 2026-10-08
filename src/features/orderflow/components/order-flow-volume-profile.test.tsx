@@ -210,8 +210,8 @@ describe('Dev6 isolated Order Flow Volume Profile drawing', () => {
             preventDefault: vi.fn(), stopPropagation: vi.fn(),
         });
         await act(async () => down(event(60)));
-        const move = host.addEventListener.mock.calls.filter((call) =>
-            call[0] === 'pointermove').at(-1)?.[1] as
+        const move = host.addEventListener.mock.calls.find((call) =>
+            call[0] === 'pointermove')?.[1] as
                 ((event: Record<string, unknown>) => void);
         await act(async () => move(event(150)));
         expect(JSON.parse(localStorage.getItem(storage) ?? '[]')[0])
