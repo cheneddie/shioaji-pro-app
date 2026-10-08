@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ContractBase } from './types/contract';
 
 const api = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock('./api', () => ({
@@ -9,7 +10,7 @@ vi.mock('./api', () => ({
 }));
 import { fetchHistoryTicks } from './shioaji';
 
-const contract = {
+const contract: ContractBase = {
     code: 'TXFR1', target_code: 'TXFJ6',
     region: 'TW', security_type: 'FUT' as const, exchange: 'TAIFEX',
 };

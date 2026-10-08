@@ -24,7 +24,7 @@ const runtime = vi.hoisted(() => {
             return offTick;
         }),
         loadHistory: vi.fn(),
-        bufferedTicks: vi.fn(() => ({ ticks: [], truncated: false })),
+        bufferedTicks: vi.fn(() => ({ ticks: [] as object[], truncated: false })),
         ownerReplayTicks: vi.fn(async () => ({
             ticks: [], truncated: false, missingOwner: false,
             earliestMs: null, latestMs: null,
