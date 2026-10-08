@@ -409,10 +409,25 @@ export async function fetchKbars(
     }
 }
 
-export function fetchHistoryTicks(contract: ContractBase, date: string) {
+export interface HistoryTicksQuery {
+    queryType?: 'AllDay' | 'RangeTime' | 'LastCount';
+    timeStart?: string;
+    timeEnd?: string;
+    lastCount?: number;
+}
+
+export function fetchHistoryTicks(
+    contract: ContractBase,
+    date: string,
+    options?: HistoryTicksQuery,
+) {
     return apiPost<HistoryTicks>('/api/v1/data/ticks', {
         contract: marketDataContract(contract),
         date,
+        ...(options?.queryType ? { query_type: options.queryType } : {}),
+        ...(options?.timeStart ? { time_start: options.timeStart } : {}),
+        ...(options?.timeEnd ? { time_end: options.timeEnd } : {}),
+        ...(options?.lastCount !== undefined ? { last_cnt: options.lastCount } : {}),
     });
 }
 
