@@ -271,6 +271,25 @@ export function defaultStyleFor(
 }
 
 const STORAGE_KEY = 'sj-pro-chart-drawings';
+const FLOW_STORAGE_KEY = 'sj-pro-orderflow-chart-drawings';
+const FLOW_TOMB_KEY = 'sj-pro-orderflow-chart-drawing-tombstones';
+const FLOW_JOURNAL_PREFIX = 'sj-pro-orderflow-chart-drawings-pending:';
+const isFlowDrawingKey = (key: string) => key.startsWith('ORDERFLOW:');
+function splitScope<T>(value: Record<string, T>): { native: Record<string, T>; flow: Record<string, T> } {
+    const native: Record<string, T> = {};
+    const flow: Record<string, T> = {};
+    for (const [key, item] of Object.entries(value)) {
+        (isFlowDrawingKey(key) ? flow : native)[key] = item;
+    }
+    return { native, flow };
+}
+/** Preserve existing serialized values when no records for that namespace exist. */
+function writeIfChanged(key: string, value: Record<string, unknown>) {
+    const raw = localStorage.getItem(key);
+    if (raw === null && Object.keys(value).length === 0) return;
+    const next = JSON.stringify(value);
+    if (raw !== next) localStorage.setItem(key, next);
+}
 
 // 每個商品鍵的上限。整份 store 是一個 localStorage 項目，無上限地長下去
 // 每次寫入與跨視窗解析都會變慢，也會吃掉其他設定的配額。
@@ -435,9 +454,9 @@ type Store = Record<string, Drawing[]>;
 type Tombs = Record<string, Record<string, Tombstone>>;
 const TOMB_KEY = 'sj-pro-chart-drawing-tombstones';
 
-function loadTombs(): Tombs {
+function loadTombsAt(storageKey: string): Tombs {
     try {
-        const raw = localStorage.getItem(TOMB_KEY);
+        const raw = localStorage.getItem(storageKey);
         if (!raw) return {};
         const parsed: unknown = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
@@ -454,7 +473,19 @@ function loadTombs(): Tombs {
     }
 }
 
-// 規則 R：墓碑否決同 id 的任何版本；撤銷自己的墓碑須走歷史操作。
+function loadTombs(): Tombs {
+    const native = loadTombsAt(TOMB_KEY);
+    const scoped = loadTombsAt(FLOW_TOMB_KEY);
+    for (const [key, ids] of Object.entries(scoped)) {
+        const target = native[key] ??= {};
+        for (const [id, tomb] of Object.entries(ids)) {
+            target[id] = mergeTombstones(target[id], tomb);
+        }
+    }
+    return native;
+}
+
+// 規則 R：墓碑否決同 id 的任何版本；撤銷自己的墓碑須走歷史操作.
 function buried(tombs: Tombs, key: string, d: Drawing): boolean {
     return tombs[key]?.[d.id] !== undefined;
 }
@@ -501,9 +532,9 @@ export function useDrawingNotices(): readonly string[] {
 }
 const EMPTY_NOTICES: string[] = [];
 
-function loadStore(tombs: Tombs = loadTombs()): Store {
+function loadStoreAt(storageKey: string, tombs: Tombs): Store {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = localStorage.getItem(storageKey);
         if (!raw) return {};
         const parsed: unknown = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
@@ -530,6 +561,12 @@ function loadStore(tombs: Tombs = loadTombs()): Store {
     } catch {
         return {}; // 壞掉的資料不能讓圖表開不起來
     }
+}
+
+function loadStore(tombs: Tombs = loadTombs()): Store {
+    // Read the original native collection unchanged, plus the independent Flow collection.
+    // A legacy Flow-scoped drawing found in native storage migrates on the next write.
+    return { ...loadStoreAt(STORAGE_KEY, tombs), ...loadStoreAt(FLOW_STORAGE_KEY, tombs) };
 }
 
 function readSettingRevisions(values: unknown, raw: unknown): SettingRevisions {
@@ -662,7 +699,7 @@ function journalNames(): string[] {
         const out: string[] = [];
         for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i);
-            if (k?.startsWith(JOURNAL_PREFIX)) out.push(k);
+            if (k?.startsWith(JOURNAL_PREFIX) || k?.startsWith(FLOW_JOURNAL_PREFIX)) out.push(k);
         }
         return out.sort();
     } catch {
@@ -920,11 +957,11 @@ let saveErrorNoticePending = false;
 // cross-window sync — 沒有這段，在主視窗畫的線不會出現在已開啟的彈出視窗
 if (typeof window !== 'undefined') {
     window.addEventListener('storage', (e) => {
-        if (e.key === STORAGE_KEY || e.key === TOMB_KEY) {
+        if (e.key === STORAGE_KEY || e.key === TOMB_KEY || e.key === FLOW_STORAGE_KEY || e.key === FLOW_TOMB_KEY) {
             reloadDrawingsFromStorage();
         } else if (e.key === SETTINGS_KEY) {
             reloadDrawingSettingsFromStorage();
-        } else if (e.key?.startsWith(JOURNAL_PREFIX) && e.newValue) {
+        } else if ((e.key?.startsWith(JOURNAL_PREFIX) || e.key?.startsWith(FLOW_JOURNAL_PREFIX)) && e.newValue) {
             // 別的視窗關掉時留下日誌：先顯示出來，再排一次（鎖內的）寫入把它併進主項目
             reloadDrawingsFromStorage();
             reloadDrawingSettingsFromStorage();
@@ -989,8 +1026,13 @@ function writeDrawingsNow(view?: { base: Store; tombs: Tombs; journals: Journal[
     const journalSettings = journals.some((j) => Object.keys(j.settingRevisions).length)
         ? loadSettingsView(journals) : undefined;
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        localStorage.setItem(TOMB_KEY, JSON.stringify(tombs));
+        const drawingsByScope = splitScope(next);
+        const tombsByScope = splitScope(tombs);
+        // Flow drawing state must never be serialized inside native chart keys.
+        writeIfChanged(STORAGE_KEY, drawingsByScope.native);
+        writeIfChanged(FLOW_STORAGE_KEY, drawingsByScope.flow);
+        writeIfChanged(TOMB_KEY, tombsByScope.native);
+        writeIfChanged(FLOW_TOMB_KEY, tombsByScope.flow);
         if (journalSettings) {
             localStorage.setItem(SETTINGS_KEY, serializeSettings(journalSettings));
         }
@@ -1109,7 +1151,13 @@ export function writeDrawingJournal() {
     // 每次都寫新的項目名稱（時間＋視窗＋序號）：bfcache 回來後又改了東西
     // 再關一次時，另一個視窗正在合併、準備刪除的舊日誌不會連新內容一起
     // 被刪掉。合併先後由各欄位／物件的 revision 決定，名稱只用於識別日誌。
-    const name = `${JOURNAL_PREFIX}${Date.now().toString(36).padStart(9, '0')}:${WINDOW_ID}:${++journalSeq}`;
+    const touchedKeys = [
+        ...pending.keys(), ...pendingRestores.keys(), ...pendingOrder.keys(),
+    ];
+    const flowOnly = !pendingSettingKeys.size && touchedKeys.length > 0 &&
+        touchedKeys.every(isFlowDrawingKey);
+    const prefix = flowOnly ? FLOW_JOURNAL_PREFIX : JOURNAL_PREFIX;
+    const name = `${prefix}${Date.now().toString(36).padStart(9, '0')}:${WINDOW_ID}:${++journalSeq}`;
     const ops: Record<string, Record<string, Op>> = {};
     for (const [key, byId] of pending) ops[key] = Object.fromEntries(byId);
     const order: Record<string, OrderMove[]> = Object.fromEntries(pendingOrder);
@@ -1624,8 +1672,10 @@ export function __resetDrawingsForTest() {
     settingRevisions = {};
     try {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(FLOW_STORAGE_KEY);
         localStorage.removeItem(SETTINGS_KEY);
         localStorage.removeItem(TOMB_KEY);
+        localStorage.removeItem(FLOW_TOMB_KEY);
         for (const name of journalNames()) localStorage.removeItem(name);
     } catch {
         // ignore
