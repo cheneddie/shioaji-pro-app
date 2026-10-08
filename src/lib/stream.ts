@@ -16,6 +16,7 @@ import { forgetServerInfo, knownServerInfo } from './server-info-store';
 import { createSharedStream, type StreamWire } from './shared-stream';
 import { invalidateTradingMirror } from './trading-mirror-lease';
 import { createRawTickReplayProtocol } from './raw-tick-replay';
+import { queueRecordedRawTick } from './raw-tick-disk';
 
 /** `stale`: the EventSource still looks open but no heartbeat or event
  *  arrived within the watchdog window (e.g. the sidecar behind a proxy was
@@ -129,6 +130,9 @@ function saveRawTick(tick: SseTick) {
         rawTickBuffers.set(tick.code, buffer);
     }
     buffer.ticks.push(tick);
+    // A follower receives mirrored events too. Only the SSE owner writes
+    // to the browser database; no extra feed, no duplicate persisted tape.
+    if (shared?.isOwner() === true) queueRecordedRawTick(tick);
     if (buffer.ticks.length > RAW_TICK_BUFFER_PER_CODE + RAW_TICK_TRIM_BATCH) {
         buffer.ticks.splice(0, RAW_TICK_TRIM_BATCH);
         buffer.truncated = true;

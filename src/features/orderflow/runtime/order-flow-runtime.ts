@@ -1,6 +1,7 @@
 // src/features/orderflow/runtime/order-flow-runtime.ts
 
 import { getApiBase } from '../../../lib/runtime';
+import { readRecordedRawTicks } from '../../../lib/raw-tick-disk';
 import { isDaySessionTick } from '../../../lib/intraday-session';
 import { retainQuote } from '../../../lib/quote-ownership';
 import {
@@ -163,6 +164,20 @@ export class OrderFlowRuntime {
         const replay = await requestOwnerRawTickReplay(
             sourceCodeOf(this.contract), fromMs, toMs,
         );
+        return {
+            ...replay,
+            ticks: replay.ticks.map(raw => ({
+                ...normalizeOrderFlowTick(raw),
+                code: this.identity.symbol,
+            })),
+        };
+    }
+
+    /** Best-effort browser-disk replay captured while an SSE owner was open.
+     * Does not prove completeness or replace a future sidecar recorder.
+     */
+    async browserRecordedTicks(fromMs: number, toMs: number) {
+        const replay = await readRecordedRawTicks(sourceCodeOf(this.contract), fromMs, toMs);
         return {
             ...replay,
             ticks: replay.ticks.map(raw => ({
