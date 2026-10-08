@@ -203,6 +203,26 @@ describe('raw regular-lot stream listeners', () => {
     });
 });
 
+describe('bounded shared physical Tick replay', () => {
+    it('retains already received physical ticks before a panel opens without alias duplication', async () => {
+        const { stream, source } = await owner();
+        stream.registerCodeAlias('TXFF6', 'TXFR1');
+        source.emit('tick_fop', regularTick('TXFF6', {
+            date: '2026/10/08', time: '15:01:00.001', total_volume: 110,
+        }));
+        source.emit('tick_fop', regularTick('TXFF6', {
+            date: '2026/10/08', time: '15:02:00.001', total_volume: 113,
+        }));
+        source.emit('tick_fop', regularTick('TXFF6', {
+            date: '2026/10/08', time: '15:02:01.001', simtrade: true,
+        }));
+        expect(stream.snapshotRecentRawTicks('TXFF6').ticks.map((t) => t.time))
+            .toEqual(['15:01:00.001', '15:02:00.001']);
+        expect(stream.snapshotRecentRawTicks('TXFR1').ticks).toHaveLength(0);
+        expect(stream.snapshotRecentRawTicks('TXFF6').truncated).toBe(false);
+    });
+});
+
 describe('Order Flow market-event bridge', () => {
     it('normalizes numeric prices and preserves exchange fields and flags', async () => {
         const { source } = await owner();

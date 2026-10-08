@@ -5,7 +5,7 @@ import {
     create,
     type ReactTestRenderer,
 } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractInfo } from '../../../lib/types/contract';
 import {
     DEFAULT_BUBBLE_SETTINGS,
@@ -26,6 +26,7 @@ const runtime = vi.hoisted(() => {
             },
         ),
         loadHistory: vi.fn(),
+        bufferedTicks: vi.fn(() => ({ ticks: [], truncated: false })),
         emit(tick: unknown) {
             tickListener?.(tick);
         },
@@ -102,7 +103,10 @@ async function flush() {
 }
 
 describe('OrderFlowBubbleIndicator runtime lifecycle', () => {
+    afterEach(() => vi.restoreAllMocks());
+
     beforeEach(() => {
+        vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-08T02:00:00Z'));
         runtime.reset();
         runtime.loadHistory.mockResolvedValue({
             date: '2026-10-08',

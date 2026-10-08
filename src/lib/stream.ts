@@ -81,6 +81,47 @@ const tickTapeListeners = new Set<(tick: SseTick) => void>();
 // batching. Keep these listeners separate from onAnyTick(), whose long-standing
 // contract is real trades only (!simtrade && volume > 0).
 const rawTickListeners = new Set<(tick: SseTick) => void>();
+
+// Opportunistic raw Tick replay shared by every panel in THIS window.
+// No extra API subscription is made. It only contains events actually
+// received by stream.ts since the window started; it is not history.
+// Keep physical source codes separate from continuous-contract aliases.
+const RAW_TICK_BUFFER_PER_CODE = 250_000;
+const RAW_TICK_BUFFER_MAX_CODES = 6;
+const RAW_TICK_TRIM_BATCH = 1_000;
+interface RawTickBuffer {
+    ticks: SseTick[];
+    truncated: boolean;
+}
+const rawTickBuffers = new Map<string, RawTickBuffer>();
+
+export function snapshotRecentRawTicks(code: string): { ticks: SseTick[]; truncated: boolean } {
+    const buffer = rawTickBuffers.get(code);
+    return {
+        ticks: buffer ? [...buffer.ticks] : [],
+        truncated: buffer?.truncated ?? false,
+    };
+}
+
+function saveRawTick(tick: SseTick) {
+    if (tick.intraday_odd || tick.simtrade || !Number.isFinite(tick.volume) ||
+        tick.volume <= 0) return;
+    let buffer = rawTickBuffers.get(tick.code);
+    if (!buffer) {
+        if (rawTickBuffers.size >= RAW_TICK_BUFFER_MAX_CODES) {
+            const oldest = rawTickBuffers.keys().next().value;
+            if (oldest !== undefined) rawTickBuffers.delete(oldest);
+        }
+        buffer = { ticks: [], truncated: false };
+        rawTickBuffers.set(tick.code, buffer);
+    }
+    buffer.ticks.push(tick);
+    if (buffer.ticks.length > RAW_TICK_BUFFER_PER_CODE + RAW_TICK_TRIM_BATCH) {
+        buffer.ticks.splice(0, RAW_TICK_TRIM_BATCH);
+        buffer.truncated = true;
+    }
+}
+
 const bidAskTapeListeners = new Set<(bidask: SseBidAsk) => void>();
 const oddTickListeners = new Set<(tick: SseTick) => void>();
 const contractEventListeners = new Set<
@@ -178,7 +219,7 @@ function handleTick(raw: string) {
     }
     ingestTick(tick);
     const alias = codeAlias.get(tick.code);
-    if (alias) ingestTick({ ...tick, code: alias });
+    if (alias) ingestTick({ ...tick, code: alias }, false);
 }
 
 function nextTickState(prev: QuoteState | undefined, tick: SseTick): QuoteState {
@@ -207,7 +248,8 @@ function ingestOddTick(tick: SseTick) {
     if (!tick.simtrade && tick.volume > 0) oddTickListeners.forEach((l) => l(tick));
 }
 
-function ingestTick(tick: SseTick) {
+function ingestTick(tick: SseTick, captureRaw = true) {
+    if (captureRaw) saveRawTick(tick);
     const state = nextTickState(quotes.get(tick.code), tick);
     quotes.set(tick.code, state);
     emitQuote(tick.code);

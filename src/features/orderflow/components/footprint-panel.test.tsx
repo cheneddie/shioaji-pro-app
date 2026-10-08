@@ -5,7 +5,7 @@ import {
     create,
     type ReactTestRenderer,
 } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractInfo } from '../../../lib/types/contract';
 
 const memoryStorage = new Map<string, string>();
@@ -66,6 +66,7 @@ const runtime = vi.hoisted(() => {
         subscribe,
         getSnapshot,
         loadHistory,
+        bufferedTicks: vi.fn(() => ({ ticks: [], truncated: false })),
         emitTick(tick: unknown) {
             tickListener?.(tick);
         },
@@ -172,7 +173,10 @@ function gridProps(view: ReactTestRenderer) {
 }
 
 describe('FootprintPanel lifecycle', () => {
+    afterEach(() => vi.restoreAllMocks());
+
     beforeEach(() => {
+        vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-08T02:00:00Z'));
         runtime.reset();
         localStorage.clear();
         runtime.loadHistory.mockResolvedValue({

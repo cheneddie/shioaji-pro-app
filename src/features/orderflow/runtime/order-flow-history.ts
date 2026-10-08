@@ -2,6 +2,7 @@
 
 import { getApiBase } from '../../../lib/runtime';
 import { fetchHistoryTicks } from '../../../lib/shioaji';
+import { dateStrOffset } from '../../../lib/utils/kbars';
 import type { ContractBase } from '../../../lib/types/contract';
 import {
     ORDER_FLOW_HISTORY_CACHE_LIMIT,
@@ -47,6 +48,10 @@ export function fetchOrderFlowHistory(
     const key = requestKey(contract, date, opts?.revision ?? 0);
     let request = requests.get(key);
     if (!request) {
+        // Current and future trading dates are never immutable historical
+        // datasets. A night-session date can be days ahead of wall-clock
+        // today; do not cache an empty/partial intraday API result forever.
+        const completedTradingDate = date < dateStrOffset(0);
         request = fetchHistoryTicks(contract, date).then((source) => {
             const count = Math.max(
                 source.datetime.length,
@@ -73,11 +78,15 @@ export function fetchOrderFlowHistory(
             );
             return { date, ticks };
         }).catch((error) => {
-            // A transient network/broker failure must not poison this
-            // request key forever. Keep concurrent callers coalesced during
-            // the failed attempt but allow a later same-revision retry.
             if (requests.get(key) === request) requests.delete(key);
             throw error;
+        }).finally(() => {
+            // Only completed trading days may retain their resolved promise.
+            // Active/future dates must be fetched afresh on the next open,
+            // without introducing an API polling loop.
+            if (!completedTradingDate && requests.get(key) === request) {
+                requests.delete(key);
+            }
         });
         requests.set(key, request);
         if (requests.size > ORDER_FLOW_HISTORY_CACHE_LIMIT) {

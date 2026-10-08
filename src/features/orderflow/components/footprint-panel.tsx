@@ -18,7 +18,6 @@ import {
     useThemeSettings,
 } from '../../../lib/theme-store';
 import type { ContractInfo } from '../../../lib/types/contract';
-import { dateStrOffset } from '../../../lib/utils/kbars';
 import type { FootprintBar } from '../domain/contracts';
 import {
     FootprintAggregator,
@@ -32,6 +31,11 @@ import {
 import { getOrderFlowRuntime } from '../runtime/order-flow-runtime';
 import { nextOrderFlowHistoryRevision } from '../runtime/order-flow-history';
 import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
+import {
+    orderFlowHistoryDate,
+    orderFlowEventTradingDate,
+    orderFlowExpectedStartMs,
+} from '../runtime/trading-date';
 import { FootprintGrid } from './footprint-grid';
 import * as styles from './footprint-panel.css';
 
@@ -204,6 +208,7 @@ export function FootprintPanel({
     const [bars, setBars] = useState<FootprintBar[]>([]);
     const [loading, setLoading] = useState(false);
     const [historyError, setHistoryError] = useState(false);
+    const [coverage, setCoverage] = useState<'loading' | 'gap' | 'unverified' | 'ready'>('loading');
     const [streamStatus, setStreamStatus] = useState('connecting');
     const [historyRevision, setHistoryRevision] = useState(0);
 
@@ -303,19 +308,39 @@ export function FootprintPanel({
     ]);
 
     useEffect(() => {
-        const loadDate = dateStrOffset(0);
+        const loadDate = orderFlowHistoryDate(contract.security_type, dayOnly);
         const loadKey = [
             contract.code,
             contract.target_code ?? '',
             runtimeSession,
-            loadDate,
+            loadDate ?? 'calendar-unknown',
             historyRevision,
         ].join('|');
         let cancelled = false;
 
+        // StrictMode may dispose the prior runtime; resolve/release inside
+        // this effect before reading the shared Tick snapshot.
+        const runtime = getOrderFlowRuntime(contract, runtimeSession);
+        const release = runtime.retain();
+
         loadedKeyRef.current = '';
         allTradesRef.current = [];
-        pendingTradesRef.current = [];
+        // Rebuild from already received physical ticks, even when the panel
+        // was closed. Snapshot happens before installing the live listener.
+        // No new market-data subscription is requested by the buffer.
+        const replay = runtime.bufferedTicks();
+        pendingTradesRef.current = replay.ticks
+            .map((raw) => footprintTradeFromRaw(
+                raw, contract.security_type, dayOnly,
+            ))
+            .filter((trade): trade is FootprintTrade =>
+                trade !== null && (
+                    loadDate === null ||
+                    orderFlowEventTradingDate(
+                        contract.security_type, dayOnly, trade.eventTimeMs,
+                    ) === loadDate
+                ),
+            );
         aggregatorRef.current = new FootprintAggregator(
             contract,
             settingsRef.current,
@@ -323,11 +348,8 @@ export function FootprintPanel({
         setBars([]);
         setLoading(true);
         setHistoryError(false);
+        setCoverage('loading');
 
-        // Resolve inside the effect for the same StrictMode reason as the
-        // Development 3 K-line: cleanup can dispose the last registry runtime.
-        const runtime = getOrderFlowRuntime(contract, runtimeSession);
-        const release = runtime.retain();
         setStreamStatus(runtime.getSnapshot().health.streamStatus);
 
         const publish = () => {
@@ -362,6 +384,21 @@ export function FootprintPanel({
             },
         );
 
+        if (loadDate === null) {
+            // No exchange calendar for this date — preserve observed data
+            // without querying an invented day.
+            const pending = pendingTradesRef.current;
+            pendingTradesRef.current = [];
+            allTradesRef.current = pending;
+            const aggregator = new FootprintAggregator(contract, settingsRef.current);
+            aggregator.ingestMany(pending);
+            aggregatorRef.current = aggregator;
+            loadedKeyRef.current = loadKey;
+            setBars(aggregator.snapshot());
+            setHistoryError(true);
+            setCoverage('gap');
+            setLoading(false);
+        } else {
         void runtime
             .loadHistory(loadDate, { revision: historyRevision })
             .then((history) => {
@@ -375,7 +412,11 @@ export function FootprintPanel({
                         ),
                     )
                     .filter(
-                        (trade): trade is FootprintTrade => trade !== null,
+                        (trade): trade is FootprintTrade =>
+                            trade !== null &&
+                            orderFlowEventTradingDate(
+                                contract.security_type, dayOnly, trade.eventTimeMs,
+                            ) === loadDate,
                     );
                 const pending = pendingTradesRef.current;
                 pendingTradesRef.current = [];
@@ -384,6 +425,22 @@ export function FootprintPanel({
                     pending,
                 );
                 allTradesRef.current = merged;
+                const expectedStart = orderFlowExpectedStartMs(
+                    loadDate, contract.security_type, dayOnly,
+                );
+                const earliest = merged.reduce(
+                    (min, trade) => Math.min(min, trade.eventTimeMs),
+                    Number.POSITIVE_INFINITY,
+                );
+                setCoverage(
+                    replay.truncated ||
+                    (expectedStart !== null && earliest > expectedStart + 5 * 60_000) ||
+                    merged.length === 0
+                        ? 'gap'
+                        : contract.security_type === 'FUT' ||
+                          contract.security_type === 'OPT'
+                            ? 'unverified' : 'ready',
+                );
                 const aggregator = new FootprintAggregator(
                     contract,
                     settingsRef.current,
@@ -407,10 +464,12 @@ export function FootprintPanel({
                 loadedKeyRef.current = loadKey;
                 setBars(aggregator.snapshot());
                 setHistoryError(true);
+                setCoverage('gap');
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
             });
+        }
 
         return () => {
             cancelled = true;
@@ -640,6 +699,8 @@ export function FootprintPanel({
                 <span className={styles.badge}>FOOTPRINT</span>
                 <span className={styles.health}>
                     {streamStatus.toUpperCase()}
+                    {coverage === 'gap' ? ' · DATA GAP' :
+                     coverage === 'unverified' ? ' · TICK 未驗證完整' : ''}
                 </span>
                 <RefreshButton
                     label='更新逐筆'
