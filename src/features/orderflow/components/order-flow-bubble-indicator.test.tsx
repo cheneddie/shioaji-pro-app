@@ -33,6 +33,11 @@ const runtime = vi.hoisted(() => {
             ticks: [] as object[], truncated: false, available: true,
             earliestMs: null as number | null, latestMs: null as number | null,
         })),
+        sidecarRecordedTicks: vi.fn(async () => ({
+            ticks: [] as object[], truncated: false, available: false,
+            recordedFromMs: null as number | null,
+            recordedToMs: null as number | null, gapCount: 0,
+        })),
         emit(tick: unknown) { tickListener?.(tick); },
         reset() {
             tickListener = null;
@@ -43,6 +48,7 @@ const runtime = vi.hoisted(() => {
             this.loadHistory.mockReset();
             this.ownerReplayTicks.mockClear();
             this.browserRecordedTicks.mockClear();
+            this.sidecarRecordedTicks.mockClear();
         },
     };
 });
@@ -203,6 +209,30 @@ describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
         expect(mocks.query).toHaveBeenCalledOnce();
         expect(view.root.findByProps({ role: 'status' }).props.children)
             .toContain('當前盤歷史 Tick 尚未發布');
+        await act(async () => view.unmount());
+    });
+    it('accepts Sidecar recorded physical ticks without requesting active broker history', async () => {
+        runtime.sidecarRecordedTicks.mockResolvedValueOnce({
+            ticks: [{
+                code: 'TXFR1', date: '2026/10/08', time: '15:00:03.000',
+                price: 103, volume: 8, totalVolume: 8, tickType: 2,
+                simtrade: false, intradayOdd: false, raw: {},
+            }],
+            available: true, truncated: false, gapCount: 0,
+            recordedFromMs: Date.UTC(2026, 9, 8, 15, 0, 3),
+            recordedToMs: Date.UTC(2026, 9, 8, 15, 0, 3),
+        });
+        mocks.visible = {
+            from: Date.UTC(2026, 9, 8, 15, 0) / 1000,
+            to: Date.UTC(2026, 9, 8, 16, 0) / 1000,
+        };
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
+        expect(mocks.query).not.toHaveBeenCalled();
+        expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(1);
+        expect(view.root.findByProps({ role: 'status' }).props.children)
+            .toContain('已回放 Sidecar 錄製成交');
         await act(async () => view.unmount());
     });
     it('replays genuine browser-recorded ticks on a refreshed viewport without Tick history', async () => {

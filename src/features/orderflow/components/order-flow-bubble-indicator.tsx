@@ -38,6 +38,8 @@ type Coverage = {
     activeUnverified: boolean;
     deferredHistory: boolean;
     recordedCount: number;
+    sidecarCount: number;
+    sidecarGaps: number;
     recorderTruncated: boolean;
     quota: number | null;
     checkedAt: number | null;
@@ -48,7 +50,8 @@ const initialCoverage = (): Coverage => ({
     loading: 0, total: 0, truncated: false, replayTruncated: false,
     unsupportedCalendar: false, unsupportedTimeframe: false,
     activeUnverified: false, deferredHistory: false,
-    recordedCount: 0, recorderTruncated: false,
+    recordedCount: 0, sidecarCount: 0, sidecarGaps: 0,
+    recorderTruncated: false,
     quota: null, checkedAt: null, blocked: null,
 });
 function coverageLabel(coverage: Coverage): string | null {
@@ -57,12 +60,15 @@ function coverageLabel(coverage: Coverage): string | null {
         return '歷史行情流量已用 ' + (coverage.quota?.toFixed(1) ?? '80') + '%，已停止補載成交氣泡';
     if (coverage.blocked === 'unknown') return '無法確認流量額度，未送出歷史查詢';
     if (coverage.unsupportedCalendar) return 'DATA GAP · 交易所行事曆未支援，未推測交易日';
+    if (coverage.sidecarGaps > 0) return 'DATA GAP · Sidecar 錄製區間有中斷，尚未取得完整逐筆';
     if (Object.values(coverage.dates).some(s => s === 'error' || s === 'gap' || s === 'empty'))
         return 'DATA GAP · 部分歷史成交缺失或交易日不符';
     if (coverage.omitted > 0)
         return '僅載入可視範圍最新 3 個交易日（其他 ' + coverage.omitted + ' 日未查詢）';
     if (coverage.truncated || coverage.replayTruncated || coverage.recorderTruncated)
         return 'DATA GAP · Tick 緩衝或回放資料已截斷';
+    if (coverage.deferredHistory && coverage.sidecarCount > 0)
+        return '當前盤歷史 Tick 尚未發布｜已回放 Sidecar 錄製成交，完整性持續驗證';
     if (coverage.deferredHistory)
         return coverage.recordedCount > 0
             ? '當前盤歷史 Tick 尚未發布｜已回放本機錄製成交，完整性尚未驗證'
@@ -101,6 +107,7 @@ export function OrderFlowBubbleIndicator({
     const replayRef = useRef<BubbleSourceTrade[]>([]);
     const ownerRef = useRef<BubbleSourceTrade[]>([]);
     const recordedRef = useRef<BubbleSourceTrade[]>([]);
+    const sidecarRef = useRef<BubbleSourceTrade[]>([]);
     const historyRef = useRef(new Map<string, BubbleSourceTrade[]>());
     const tradesRef = useRef<BubbleSourceTrade[]>([]);
     const aggregatorRef = useRef(new BubbleAggregator(settings));
@@ -117,7 +124,8 @@ export function OrderFlowBubbleIndicator({
     const commit = (truncated: () => void) => {
         const historical = [...historyRef.current.values()].flat();
         const replay = mergeBubbleHistoryAndPending(replayRef.current, ownerRef.current);
-        const allReplays = mergeBubbleHistoryAndPending(recordedRef.current, replay);
+        const nativeAndDisk = mergeBubbleHistoryAndPending(sidecarRef.current, recordedRef.current);
+        const allReplays = mergeBubbleHistoryAndPending(nativeAndDisk, replay);
         let merged = mergeBubbleHistoryAndPending(historical, allReplays);
         merged = mergeBubbleHistoryAndPending(merged, liveRef.current);
         if (merged.length > MAX_TRADES) {
@@ -162,6 +170,7 @@ export function OrderFlowBubbleIndicator({
         let truncated = false;
         let ownerIncomplete = false;
         let recorderTruncated = false;
+        let sidecarGaps = 0;
         let inFlight = 0;
         let scheduledSignature = '';
 
@@ -171,6 +180,7 @@ export function OrderFlowBubbleIndicator({
         replayRef.current = [];
         ownerRef.current = [];
         recordedRef.current = [];
+        sidecarRef.current = [];
         tradesRef.current = [];
         aggregatorRef.current = new BubbleAggregator(settingsRef.current);
         setCandidates([]);
@@ -210,6 +220,7 @@ export function OrderFlowBubbleIndicator({
                 deferredHistory: currentPlan.slices.some(s =>
                     dateStates.get(sliceId(s)) === 'recording'),
                 recordedCount: recordedRef.current.length,
+                sidecarCount: sidecarRef.current.length, sidecarGaps,
                 recorderTruncated,
                 quota, checkedAt, blocked,
             });
@@ -252,6 +263,8 @@ export function OrderFlowBubbleIndicator({
             const generation = ++generationRef.current;
             ownerRef.current = [];
             recordedRef.current = [];
+            sidecarRef.current = [];
+            sidecarGaps = 0;
             ownerIncomplete = false;
             recorderTruncated = false;
             dateStates.clear();
@@ -268,6 +281,28 @@ export function OrderFlowBubbleIndicator({
             commit(markTruncated);
             updateCoverage();
             if (plan.unsupportedCalendar || blocked || plan.slices.length === 0) return;
+            // Sidecar disk-backed recording is activated ONLY after /info
+            // advertises protocol v1. There is no probe/404 on old Sidecars.
+            void runtime.sidecarRecordedTicks(
+                Math.min(...plan.slices.map(s => s.fromMs)),
+                Math.max(...plan.slices.map(s => s.toMs)),
+            ).then(recorded => {
+                if (cancelled || generation !== generationRef.current) return;
+                if (recorded.available) {
+                    sidecarGaps = recorded.gapCount;
+                    recorderTruncated ||= recorded.truncated;
+                    sidecarRef.current = recorded.ticks.map(raw => bubbleTradeFromRaw(
+                        raw, timeframeMinutes, contract.security_type, dayOnly,
+                    )).filter((trade): trade is BubbleSourceTrade => trade !== null);
+                    commit(markTruncated);
+                    updateCoverage();
+                }
+            }).catch(() => {
+                if (cancelled || generation !== generationRef.current) return;
+                recorderTruncated = true;
+                updateCoverage();
+            });
+
             // Recover genuine SSE-owner events from IndexedDB after reload.
             // Storage never guarantees coverage: lack of a recorder while all
             // windows were closed remains an explicit possible gap.
