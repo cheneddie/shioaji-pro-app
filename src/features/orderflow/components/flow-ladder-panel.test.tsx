@@ -83,6 +83,10 @@ describe('Development 7 FlowLadderPanel read-only lifecycle', () => {
         expect(m.subscribe).toHaveBeenCalledOnce();
         const panel = view.root.findByProps({'data-read-only':'true'});
         expect(panel.props['aria-label']).toBe('Order Flow 報價');
+        const scroller = view.root.findByProps({
+            'aria-label': 'Order Flow 逐價位報價',
+        });
+        expect(scroller.findAllByProps({role: 'columnheader'})).toHaveLength(8);
         const price = view.root.findAllByProps({'data-price':100})[0]!;
         expect(price.props['data-last']).toBe('true');
         const values = price.findAllByType('span')

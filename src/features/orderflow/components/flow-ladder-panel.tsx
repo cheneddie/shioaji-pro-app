@@ -172,7 +172,8 @@ export function FlowLadderPanel({
         () => projectFlowLadderRows(prices, snapshot?.levels ?? [], lastPrice, contract),
         [prices, snapshot, contract.tick, contract.tick_rule, tickBandsVersion],
     );
-    const viewport = flowLadderViewport(rows.length, scrollTop, height);
+    const viewport = flowLadderViewport(rows.length, scrollTop,
+        Math.max(FLOW_LADDER_ROW_HEIGHT, height - FLOW_LADDER_ROW_HEIGHT));
     const visible = rows.slice(viewport.start, viewport.end);
     const max = flowLadderMaxima(visible);
     const decimals = centerPrice === null ? 0 :
@@ -192,12 +193,15 @@ export function FlowLadderPanel({
         const node = listRef.current;
         if (!follow || hover || centerPrice === null || !rows.length) return;
         const h = node?.clientHeight || height;
+        const viewportHeight = Math.max(
+            FLOW_LADDER_ROW_HEIGHT, h - FLOW_LADDER_ROW_HEIGHT,
+        );
         const target = Math.max(0, Math.min(
-            rows.length * FLOW_LADDER_ROW_HEIGHT - h,
+            rows.length * FLOW_LADDER_ROW_HEIGHT - viewportHeight,
             FLOW_LADDER_RADIUS * FLOW_LADDER_ROW_HEIGHT -
-                h / 2 + FLOW_LADDER_ROW_HEIGHT / 2,
+                viewportHeight / 2 + FLOW_LADDER_ROW_HEIGHT / 2,
         ));
-        if (node) node.scrollTop = target;
+        if (node) node.scrollTop = target + FLOW_LADDER_ROW_HEIGHT;
         setScrollTop(target);
     }, [centerPrice, follow, hover, rows.length, height]);
 
@@ -241,21 +245,23 @@ export function FlowLadderPanel({
                         : '價格級距資料尚未就緒，暫不顯示推測階梯'}
                 </div>
             )}
-            {canRender && <>
-                <div className={styles.header} role='row'>
-                    {COLS.map((col) => (
-                        <div key={col.label} role='columnheader' className={styles.numeric}
-                            title={col.hint}>{col.label}</div>
-                    ))}
-                </div>
+            {canRender && (
                 <div ref={listRef} role='table' aria-label='Order Flow 逐價位報價'
                     className={styles.scroll} onScroll={(e) =>
-                        setScrollTop(e.currentTarget.scrollTop)}
+                        setScrollTop(Math.max(0,
+                            e.currentTarget.scrollTop - FLOW_LADDER_ROW_HEIGHT))}
                     onMouseEnter={() => setHover(true)}
                     onMouseLeave={() => setHover(false)}
                     onWheel={() => setFollow(false)}
                     onTouchStart={() => setFollow(false)}>
                     <div className={styles.table}>
+                        <div className={styles.header} role='row'>
+                            {COLS.map((col) => (
+                                <div key={col.label} role='columnheader'
+                                    className={styles.numeric}
+                                    title={col.hint}>{col.label}</div>
+                            ))}
+                        </div>
                         <div style={{ height: viewport.topPadding }} aria-hidden='true' />
                         {visible.map((row) => (
                             <FlowLadderRowView key={row.price}
@@ -264,7 +270,7 @@ export function FlowLadderPanel({
                         <div style={{ height: viewport.bottomPadding }} aria-hidden='true' />
                     </div>
                 </div>
-            </>}
+            )}
         </section>
     );
 }
