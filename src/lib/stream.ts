@@ -15,6 +15,7 @@ import { isChildWindow } from './window-role';
 import { forgetServerInfo, knownServerInfo } from './server-info-store';
 import { createSharedStream, type StreamWire } from './shared-stream';
 import { invalidateTradingMirror } from './trading-mirror-lease';
+import { createRawTickReplayProtocol } from './raw-tick-replay';
 
 /** `stale`: the EventSource still looks open but no heartbeat or event
  *  arrived within the watchdog window (e.g. the sidecar behind a proxy was
@@ -94,6 +95,18 @@ interface RawTickBuffer {
     truncated: boolean;
 }
 const rawTickBuffers = new Map<string, RawTickBuffer>();
+
+let crossWindowReplay: ReturnType<typeof createRawTickReplayProtocol> | null = null;
+export function requestOwnerRawTickReplay(code: string, fromMs: number, toMs: number) {
+    ensureStream();
+    return crossWindowReplay
+        ? crossWindowReplay.request(code, fromMs, toMs)
+        : Promise.resolve({
+            ticks: [], truncated: true, missingOwner: true,
+            earliestMs: null, latestMs: null,
+        });
+}
+
 
 export function snapshotRecentRawTicks(code: string): { ticks: SseTick[]; truncated: boolean } {
     const buffer = rawTickBuffers.get(code);
@@ -874,6 +887,12 @@ let started = false;
 export function ensureStream() {
     if (!started) {
         started = true;
+        crossWindowReplay ??= createRawTickReplayProtocol(
+            'sj-orderflow-replay:' +
+                (typeof location === 'undefined' ? 'test' : location.origin) +
+                ':' + getApiBase() + ':' + getStreamBase(),
+            isStreamOwner, snapshotRecentRawTicks,
+        );
         shared = createSharedStream({
             name: `sj-market-stream:${typeof location === 'undefined' ? 'test' : location.origin}:${getApiBase()}:${getStreamBase()}`,
             main: !isChildWindow(),
@@ -1004,7 +1023,7 @@ export function onContractEvent(
 // SSE 連線與殭屍 listener（每 tick 重複灌、CPU 飆高）。一變更就整頁
 // 重載，開發期不會再累積疊層。
 if (import.meta.hot) {
-    import.meta.hot.dispose(() => { if (watchdogTimer) clearInterval(watchdogTimer); shared?.close(); es?.close(); });
+    import.meta.hot.dispose(() => { if (watchdogTimer) clearInterval(watchdogTimer); crossWindowReplay?.close(); shared?.close(); es?.close(); });
     import.meta.hot.accept(() => {
         import.meta.hot?.invalidate();
     });

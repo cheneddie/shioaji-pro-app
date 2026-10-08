@@ -8,6 +8,7 @@ import {
     getStreamStatus,
     subscribeStatusStore,
     snapshotRecentRawTicks,
+    requestOwnerRawTickReplay,
 } from '../../../lib/stream';
 import type { ContractBase } from '../../../lib/types/contract';
 import {
@@ -151,6 +152,23 @@ export class OrderFlowRuntime {
                 code: this.identity.symbol,
             })),
             truncated: snapshot.truncated,
+        };
+    }
+
+    /**
+     * Request event-time bounded replay from the single shared SSE owner.
+     * No quote subscription or EventSource is created.
+     */
+    async ownerReplayTicks(fromMs: number, toMs: number) {
+        const replay = await requestOwnerRawTickReplay(
+            sourceCodeOf(this.contract), fromMs, toMs,
+        );
+        return {
+            ...replay,
+            ticks: replay.ticks.map(raw => ({
+                ...normalizeOrderFlowTick(raw),
+                code: this.identity.symbol,
+            })),
         };
     }
 
