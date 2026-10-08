@@ -16,12 +16,13 @@ import {
     fetchOrderFlowVisibleSlice, type SliceCoverage,
 } from '../runtime/order-flow-query-coordinator';
 import { planVisibleTickSlices, type VisibleTickSlice } from '../runtime/visible-tick-range';
+import { shouldDeferBrokerHistory } from '../runtime/broker-history-eligibility';
 import { OrderFlowBubbleLayer } from './order-flow-bubble-layer';
 
 const MAX_TRADES = 300_000;
 const NOTIFY_MS = 48;
 const DEBOUNCE_MS = 300;
-type DateState = SliceCoverage | 'loading' | 'stale';
+type DateState = SliceCoverage | 'loading' | 'stale' | 'recording';
 type Coverage = {
     requested: string[];
     selected: string[];
@@ -35,6 +36,7 @@ type Coverage = {
     unsupportedCalendar: boolean;
     unsupportedTimeframe: boolean;
     activeUnverified: boolean;
+    deferredHistory: boolean;
     quota: number | null;
     checkedAt: number | null;
     blocked: 'quota' | 'unknown' | null;
@@ -43,7 +45,8 @@ const initialCoverage = (): Coverage => ({
     requested: [], selected: [], loaded: [], omitted: 0, dates: {},
     loading: 0, total: 0, truncated: false, replayTruncated: false,
     unsupportedCalendar: false, unsupportedTimeframe: false,
-    activeUnverified: false, quota: null, checkedAt: null, blocked: null,
+    activeUnverified: false, deferredHistory: false,
+    quota: null, checkedAt: null, blocked: null,
 });
 function coverageLabel(coverage: Coverage): string | null {
     if (coverage.unsupportedTimeframe) return '成交氣泡僅支援 60m 以下';
@@ -57,6 +60,8 @@ function coverageLabel(coverage: Coverage): string | null {
         return '僅載入可視範圍最新 3 個交易日（其他 ' + coverage.omitted + ' 日未查詢）';
     if (coverage.truncated || coverage.replayTruncated)
         return 'DATA GAP · Tick 緩衝或畫面資料已截斷';
+    if (coverage.deferredHistory)
+        return '當前盤歷史 Tick 尚未發布｜使用已錄製／即時成交，開盤前可能有缺口';
     if (coverage.activeUnverified)
         return 'Tick 完整性未驗證 · 當前盤可能仍有缺口';
     if (coverage.loading > 0)
@@ -167,7 +172,7 @@ export function OrderFlowBubbleIndicator({
             const dates: Record<string, DateState> = {};
             const severity: Record<DateState, number> = {
                 quota: 7, unknown: 7, error: 6, gap: 5, empty: 5,
-                stale: 3, loading: 2, ready: 1, cancelled: 0,
+                stale: 3, loading: 2, recording: 2, ready: 1, cancelled: 0,
             };
             for (const slice of currentPlan.slices) {
                 const state = dateStates.get(sliceId(slice));
@@ -193,6 +198,8 @@ export function OrderFlowBubbleIndicator({
                 unsupportedCalendar: currentPlan.unsupportedCalendar,
                 unsupportedTimeframe: currentPlan.unsupportedTimeframe,
                 activeUnverified: currentPlan.selectedDates.some(d => d >= todayTW()),
+                deferredHistory: currentPlan.slices.some(s =>
+                    dateStates.get(sliceId(s)) === 'recording'),
                 quota, checkedAt, blocked,
             });
         };
@@ -270,7 +277,8 @@ export function OrderFlowBubbleIndicator({
             });
             for (const slice of plan.slices) {
                 const key = sliceId(slice);
-                dateStates.set(key, 'cancelled');
+                dateStates.set(key, shouldDeferBrokerHistory(contract.security_type, slice)
+                    ? 'recording' : 'cancelled');
             }
             // Sequential priority: newest date first. Each result is committed
             // individually, so the user sees completed and live bubbles early.
@@ -278,6 +286,11 @@ export function OrderFlowBubbleIndicator({
                 for (const slice of plan.slices) {
                     if (cancelled || generation !== generationRef.current || blocked) return;
                     const key = sliceId(slice);
+                    if (shouldDeferBrokerHistory(contract.security_type, slice)) {
+                        dateStates.set(key, 'recording');
+                        updateCoverage();
+                        continue;
+                    }
                     dateStates.set(key, 'loading');
                     inFlight++;
                     updateCoverage();
