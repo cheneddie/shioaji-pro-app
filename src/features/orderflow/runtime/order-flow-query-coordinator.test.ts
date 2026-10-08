@@ -84,14 +84,41 @@ describe('shared Order Flow range query quota coordinator', () => {
         });
         const { fetchOrderFlowVisibleSlice } = await import('./order-flow-query-coordinator');
         const first = await fetchOrderFlowVisibleSlice(contract, slice, { revision: 0 });
-        expect(first.status).toBe('ready');
+        expect(first.status).toBe('quota');
         expect(first.percent).toBe(81);
+        // Keep the valid slice we just obtained even though the following
+        // query is blocked.
+        expect(first.ticks).toHaveLength(1);
         const second = await fetchOrderFlowVisibleSlice(contract, {
             ...slice, timeStart: '09:15:01',
             timeEnd: '09:16:00', fromMs: toMs + 1000, toMs: toMs + 60_000,
         }, { revision: 0 });
         expect(second.status).toBe('quota');
         expect(m.ticks).toHaveBeenCalledOnce();
+    });
+    it('retains validated ticks but blocks after a failed post-request quota refresh', async () => {
+        m.usage.mockResolvedValueOnce({
+            connections: 1, bytes: 15, limit_bytes: 100, remaining_bytes: 85,
+        }).mockRejectedValue(new Error('no usage'));
+        const { fetchOrderFlowVisibleSlice } = await import('./order-flow-query-coordinator');
+        const answer = await fetchOrderFlowVisibleSlice(contract, slice, { revision: 9 });
+        expect(answer.status).toBe('unknown');
+        expect(answer.ticks).toHaveLength(1);
+        expect(m.ticks).toHaveBeenCalledOnce();
+    });
+    it('does not cache a wrong-date gap as an immutable completed slice', async () => {
+        const { fetchOrderFlowVisibleSlice } = await import('./order-flow-query-coordinator');
+        m.ticks.mockResolvedValue({
+            ...fixture,
+            datetime: ['2026-10-07 09:01:00.123'],
+        });
+        const first = await fetchOrderFlowVisibleSlice(contract, slice, { revision: 19 });
+        expect(first.status).toBe('gap');
+        // A new revision provides an explicit retry without poisoning the
+        // original immutable date cache.
+        const retried = await fetchOrderFlowVisibleSlice(contract, slice, { revision: 20 });
+        expect(retried.status).toBe('gap');
+        expect(m.ticks).toHaveBeenCalledTimes(2);
     });
     it('blocks when usage cannot be verified and does not call Tick API', async () => {
         m.usage.mockRejectedValue(new Error('offline'));

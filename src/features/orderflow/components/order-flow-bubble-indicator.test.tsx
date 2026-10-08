@@ -164,6 +164,39 @@ describe('OrderFlowBubbleIndicator visible-range lifecycle', () => {
         expect(view.root.findByProps({ 'data-testid': 'bubble-layer' }).props['data-count']).toBe(2);
         await act(async () => view.unmount());
     });
+    it('does not indefinitely restart hydration when live Kbar updates fire', async () => {
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent()); });
+        // Candle updates occur continuously, but the aligned 15-minute
+        // viewport request is identical. Do not reset the 300 ms debounce.
+        for (let i = 0; i < 9; i++) {
+            await act(async () => {
+                for (const cb of [...listeners]) cb();
+                await vi.advanceTimersByTimeAsync(50);
+            });
+        }
+        await flush();
+        expect(mocks.query).toHaveBeenCalledOnce();
+        await act(async () => view.unmount());
+    });
+    it('changes requested trading days when the viewport pans into the night', async () => {
+        let view!: ReactTestRenderer;
+        await act(async () => { view = create(viewComponent()); });
+        await completeVisibleDebounce();
+        expect(mocks.query.mock.calls[0]![1].date).toBe('2026-10-08');
+        mocks.visible = {
+            from: Date.UTC(2026, 9, 8, 15, 0) / 1000,
+            to: Date.UTC(2026, 9, 8, 16, 30) / 1000,
+        };
+        await act(async () => {
+            for (const cb of [...listeners]) cb();
+        });
+        await completeVisibleDebounce();
+        expect(mocks.query.mock.calls[1]![1]).toMatchObject({
+            date: '2026-10-12', session: 'night',
+        });
+        await act(async () => view.unmount());
+    });
     it('presentation settings do not re-request history', async () => {
         let view!: ReactTestRenderer;
         await act(async () => { view = create(viewComponent()); });

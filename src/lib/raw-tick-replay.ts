@@ -24,8 +24,22 @@ const MAX_SPAN_MS = 45 * 86_400_000;
 
 export function replayEventTimeMs(tick: Pick<SseTick, 'date' | 'time'>): number | null {
     if (typeof tick.date !== 'string' || typeof tick.time !== 'string') return null;
-    const value = Date.parse(tick.date.replace(/\//g, '-') + 'T' + tick.time + 'Z');
-    return Number.isFinite(value) ? value : null;
+    const date = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(tick.date);
+    const time = /^(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?$/.exec(tick.time);
+    if (!date || !time) return null;
+    const milliseconds = Number((time[4] ?? '').padEnd(3, '0').slice(0, 3));
+    const year = Number(date[1]), month = Number(date[2]), day = Number(date[3]);
+    const hours = Number(time[1]), minutes = Number(time[2]), seconds = Number(time[3]);
+    const value = Date.UTC(year, month - 1, day, hours, minutes, seconds, milliseconds);
+    const roundtrip = new Date(value);
+    if (!Number.isFinite(value) ||
+        roundtrip.getUTCFullYear() !== year ||
+        roundtrip.getUTCMonth() + 1 !== month ||
+        roundtrip.getUTCDate() !== day ||
+        roundtrip.getUTCHours() !== hours ||
+        roundtrip.getUTCMinutes() !== minutes ||
+        roundtrip.getUTCSeconds() !== seconds) return null;
+    return value;
 }
 function empty(missingOwner = false): RawTickReplay {
     return { ticks: [], truncated: missingOwner, missingOwner, earliestMs: null, latestMs: null };
