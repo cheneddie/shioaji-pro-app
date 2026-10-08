@@ -119,6 +119,30 @@ const lockName = () => 'sj-orderflow-history:' +
     (typeof location === 'undefined' ? 'test' : location.origin) + ':' + getApiBase();
 const stampName = () => lockName() + ':last-dispatch';
 
+// Both a rejected and a forever-pending usage endpoint must fail closed.
+// Bounded timeout prevents one stalled GET from holding the cross-window
+// historical Tick lock indefinitely.
+async function readVerifiedUsage(): Promise<Usage> {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+            controller.abort();
+            reject(new Error('usage timeout'));
+        }, 5_000);
+    });
+    try {
+        const raw = await Promise.race([
+            apiGet<Usage>('/api/v1/auth/usage', { signal: controller.signal }),
+            expired,
+        ]);
+        return parseUsage(raw);
+    } finally {
+        if (timeout) clearTimeout(timeout);
+    }
+}
+
+
 async function guardedRequest(
     contract: ContractBase,
     slice: VisibleTickSlice,
@@ -146,7 +170,7 @@ async function guardedRequest(
         let usage: Usage;
         const checkedAt = Date.now();
         try {
-            usage = parseUsage(await apiGet<Usage>('/api/v1/auth/usage'));
+            usage = await readVerifiedUsage();
         } catch {
             return result(slice, 'unknown', [], '無法確認流量額度，未送出歷史查詢');
         }
@@ -180,7 +204,7 @@ async function guardedRequest(
         // A failed after-query usage read blocks subsequent queries (each next
         // request always makes its own fail-closed preflight regardless).
         try {
-            const after = parseUsage(await apiGet<Usage>('/api/v1/auth/usage'));
+            const after = await readVerifiedUsage();
             const afterQuota = quotaState(after);
             answer.percent = afterQuota.percent;
             answer.checkedAt = Date.now();
@@ -293,7 +317,7 @@ export async function quotaGuardedOrderFlowAllDay(
         if (interval) await new Promise<void>(resolve => setTimeout(resolve, interval));
         let usage: Usage;
         try {
-            usage = parseUsage(await apiGet<Usage>('/api/v1/auth/usage'));
+            usage = await readVerifiedUsage();
         } catch {
             throw new Error('無法確認流量額度，未送出歷史查詢');
         }
@@ -312,7 +336,7 @@ export async function quotaGuardedOrderFlowAllDay(
         } finally {
             // Every historical Tick request triggers an after-query refresh;
             // subsequent queries require their own verified preflight.
-            try { parseUsage(await apiGet<Usage>('/api/v1/auth/usage')); }
+            try { await readVerifiedUsage(); }
             catch { /* next request fails closed on its own preflight */ }
         }
         return raw;

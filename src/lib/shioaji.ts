@@ -428,7 +428,7 @@ export function fetchHistoryTicks(
         ...(options?.timeStart ? { time_start: options.timeStart } : {}),
         ...(options?.timeEnd ? { time_end: options.timeEnd } : {}),
         ...(options?.lastCount !== undefined ? { last_cnt: options.lastCount } : {}),
-    });
+    }, options?.queryType === 'RangeTime' ? { timeoutMs: 45_000 } : undefined);
 }
 
 export function fetchLastTicks(
