@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { RefObject } from 'react';
 import type { ContractInfo } from '../../../lib/types/contract';
+import { clearTickBands, setTickBands } from '../../../lib/tick-bands';
 
 const mock = vi.hoisted(() => ({
     release: vi.fn(), off: vi.fn(), load: vi.fn(),
@@ -257,6 +258,74 @@ describe('Dev6 isolated Order Flow Volume Profile drawing', () => {
             .map((span) => span.props.children))
             .toContain('商品缺少最小跳動值');
         await act(async () => view.unmount());
+    });
+
+    it('loads exchange tick bands and paints VP level bars plus POC/VAH/VAL', async () => {
+        const storage = 'sj-pro-orderflow-vp-VPTEST-TXFR1-TXFJ6-all';
+        const startMs = Date.UTC(2026, 9, 8, 9, 5);
+        localStorage.setItem(storage, JSON.stringify([{
+            id: 'banded', fromTime: startMs / 1000,
+            toTime: startMs / 1000 + 300,
+        }]));
+        setTickBands('DEV6_TEST_BANDS', [
+            { min: 0, max: 10, tick: 0.05 },
+            { min: 10, max: null, tick: 0.1 },
+        ]);
+        mock.load.mockResolvedValue({
+            date: '2026-10-08',
+            ticks: [
+                {
+                    datetime: '2026-10-08 09:00:01.000',
+                    eventTimeMs: startMs - 299_000,
+                    price: 9.95, volume: 5, tickType: 1, side: 'buy',
+                },
+                {
+                    datetime: '2026-10-08 09:06:01.000',
+                    eventTimeMs: startMs + 61_000,
+                    price: 10.2, volume: 9, tickType: 2, side: 'sell',
+                },
+            ],
+        });
+        const oldCoordinate = scale.timeToCoordinate;
+        scale.timeToCoordinate = () => 100;
+        const ctx = {
+            setTransform: vi.fn(), clearRect: vi.fn(),
+            setLineDash: vi.fn(), beginPath: vi.fn(),
+            moveTo: vi.fn(), lineTo: vi.fn(),
+            stroke: vi.fn(), fillRect: vi.fn(),
+            fillText: vi.fn(),
+        };
+        let view!: ReactTestRenderer;
+        try {
+            await act(async () => {
+                view = create(
+                    <OrderFlowVolumeProfileDrawingLayer
+                        panelId='VPTEST'
+                        contract={{ ...contract, tick_rule: 'DEV6_TEST_BANDS' }}
+                        timeframeMinutes={5} dayOnly={false}
+                        runtimeSession='all' historyRevision={0}
+                        active={false} onActiveChange={vi.fn()}
+                        hostRef={ref<HTMLDivElement>(host)}
+                        chartRef={ref<IChartApi>(chart)}
+                        candleRef={ref<ISeriesApi<'Candlestick'>>(candle)}
+                        colors={colors}
+                    />,
+                    { createNodeMock: () => ({
+                        style: {}, getContext: () => ctx,
+                    }) },
+                );
+            });
+            await flush();
+            expect(view.root.findAllByType('span')
+                .map((span) => span.props.children)).toContain('VP 已載入');
+            expect(ctx.fillRect.mock.calls.length).toBeGreaterThanOrEqual(4);
+            expect(ctx.fillText.mock.calls.map((call) => call[0]))
+                .toEqual(expect.arrayContaining(['POC', 'VAH', 'VAL']));
+        } finally {
+            if (view) await act(async () => view.unmount());
+            scale.timeToCoordinate = oldCoordinate;
+            clearTickBands();
+        }
     });
 
 });
