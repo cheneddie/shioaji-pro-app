@@ -303,7 +303,10 @@ interface CumulativeBucket {
 export class BubbleAggregator {
     private cumulative = new Map<string, CumulativeBucket>();
     private single = new Map<string, BubbleCandidate>();
-    private charge = new Map<string, BubbleCandidate>();
+    private charge = new Map<string, {
+        candidate: BubbleCandidate;
+        firstEventTimeMs: number;
+    }>();
 
     constructor(readonly settings: BubbleSettings) {}
 
@@ -371,16 +374,26 @@ export class BubbleAggregator {
         const key = `${windowStart}|${trade.side}`;
         const current = this.charge.get(key);
         if (current) {
-            current.volume += trade.volume;
-            current.rawValue += trade.volume;
+            current.candidate.volume += trade.volume;
+            current.candidate.rawValue += trade.volume;
+            // History and live handoff can arrive out of order. The
+            // anchor is the earliest event in this window, not the
+            // first event delivered to this aggregator.
+            if (trade.eventTimeMs < current.firstEventTimeMs) {
+                current.firstEventTimeMs = trade.eventTimeMs;
+                current.candidate.price = trade.price;
+                current.candidate.timestamp = trade.timestamp;
+            }
         } else {
-            // Charge anchors to the first order price and its candle.
             this.charge.set(key, {
-                timestamp: trade.timestamp,
-                price: trade.price,
-                side: trade.side,
-                volume: trade.volume,
-                rawValue: trade.volume,
+                firstEventTimeMs: trade.eventTimeMs,
+                candidate: {
+                    timestamp: trade.timestamp,
+                    price: trade.price,
+                    side: trade.side,
+                    volume: trade.volume,
+                    rawValue: trade.volume,
+                },
             });
         }
         return true;
@@ -409,13 +422,14 @@ export class BubbleAggregator {
         } else if (this.settings.filterMode === 'single') {
             candidates = [...this.single.values()];
         } else {
-            candidates = [...this.charge.values()].filter(
-                (candidate) =>
+            candidates = [...this.charge.values()]
+                .map((entry) => entry.candidate)
+                .filter((candidate) =>
                     volumeAllowed(
                         candidate.volume,
                         this.settings,
                     ),
-            );
+                );
         }
 
         return candidates
@@ -439,22 +453,64 @@ export class BubbleAggregator {
     }
 }
 
+export function bubbleScaleReferences(
+    visible: readonly BubbleCandidate[],
+) {
+    let visibleMax = 1;
+    const byBar = new Map<number, number>();
+    for (const item of visible) {
+        visibleMax = Math.max(visibleMax, item.volume);
+        byBar.set(
+            item.timestamp,
+            Math.max(byBar.get(item.timestamp) ?? 1, item.volume),
+        );
+    }
+    return { visibleMax, byBar };
+}
+
+/** Inputs must already be ordered by timestamp, as BubbleAggregator.snapshot() is. */
+export function selectVisibleBubbleCandidates(
+    candidates: readonly BubbleCandidate[],
+    from: number | null,
+    to: number | null,
+): BubbleCandidate[] {
+    if (
+        from === null ||
+        to === null ||
+        !Number.isFinite(from) ||
+        !Number.isFinite(to)
+    ) {
+        return candidates.slice();
+    }
+    const lower = Math.min(from, to);
+    const upper = Math.max(from, to);
+
+    let lo = 0;
+    let hi = candidates.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (candidates[mid]!.timestamp < lower) lo = mid + 1;
+        else hi = mid;
+    }
+    const start = lo;
+    hi = candidates.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (candidates[mid]!.timestamp <= upper) lo = mid + 1;
+        else hi = mid;
+    }
+    return candidates.slice(start, lo);
+}
+
 export function bubbleScaleMaximum(
     candidate: BubbleCandidate,
     visible: BubbleCandidate[],
     scaleMode: BubbleScaleMode,
 ) {
-    const sameScope =
-        scaleMode === 'bar'
-            ? visible.filter(
-                  (item) =>
-                      item.timestamp === candidate.timestamp,
-              )
-            : visible;
-    return Math.max(
-        1,
-        ...sameScope.map((item) => item.volume),
-    );
+    const refs = bubbleScaleReferences(visible);
+    return scaleMode === 'bar'
+        ? (refs.byBar.get(candidate.timestamp) ?? 1)
+        : refs.visibleMax;
 }
 
 export function bubbleRadius(

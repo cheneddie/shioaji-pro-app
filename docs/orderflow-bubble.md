@@ -113,3 +113,11 @@ Development 5 does not implement:
 - click-to-trade
 - iceberg / absorption inference
 - any dependency upgrade
+
+## Performance and order guarantees
+
+- Time-range selection uses binary search on sorted candidate timestamps, not a full-candidate projection on every pan/zoom.
+- Radius scaling precomputes visible/per-bar maxima once per paint; drawing is linear in the number of visible bubbles, not quadratic.
+- Bounded event retention trims in chunks of 10,000 after the 300,000-event target, preventing a full rebuild on every tick beyond the cap.
+- The earliest event-time in each charge window determines its price/candle anchor even if history or live events are ingested out of order. Equal-timestamp events preserve first-observed ordering because the wire payload does not carry a physical sequence number.
+- The overlay listens to time-range changes, candle data updates, resize, and wheel/pointer interaction, including vertical price-scale movements.

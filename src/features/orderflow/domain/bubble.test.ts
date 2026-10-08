@@ -7,6 +7,8 @@ import {
     DEFAULT_BUBBLE_SETTINGS,
     bubbleRadius,
     bubbleScaleMaximum,
+    bubbleScaleReferences,
+    selectVisibleBubbleCandidates,
     bubbleTradeFromHistory,
     hitTestBubble,
     mergeBubbleHistoryAndPending,
@@ -138,6 +140,27 @@ describe('BubbleAggregator', () => {
         ]);
     });
 
+    it('anchors charge to earliest event-time despite out-of-order arrival', () => {
+        const agg = new BubbleAggregator({
+            ...DEFAULT_BUBBLE_SETTINGS,
+            enabled: true,
+            filterMode: 'charge',
+            chargeWindowSeconds: 5,
+        });
+        agg.ingestMany([
+            trade(64, 104, 2, 'buy', 120),
+            trade(61, 101, 3, 'buy', 60),
+            trade(62, 102, 4, 'buy', 120),
+        ]);
+        expect(agg.snapshot()).toEqual([{
+            timestamp: 60,
+            price: 101,
+            side: 'buy',
+            volume: 9,
+            rawValue: 9,
+        }]);
+    });
+
     it('filters buy/sell direction after aggregation', () => {
         const agg = new BubbleAggregator({
             ...DEFAULT_BUBBLE_SETTINGS,
@@ -253,6 +276,29 @@ describe('Bubble settings, scale and hit testing', () => {
                 'bar',
             ),
         ).toBe(20);
+    });
+
+    it('uses linear-time scale references and bounded time-range slicing', () => {
+        const candidates = Array.from({ length: 30_000 }, (_, i) => ({
+            timestamp: i * 60,
+            price: 100,
+            side: 'buy' as const,
+            volume: i + 1,
+            rawValue: i + 1,
+        }));
+        const sliced = selectVisibleBubbleCandidates(
+            candidates,
+            600,
+            1200,
+        );
+        expect(sliced).toHaveLength(11);
+        expect(sliced[0]?.timestamp).toBe(600);
+        expect(sliced.at(-1)?.timestamp).toBe(1200);
+        const refs = bubbleScaleReferences(candidates);
+        expect(refs.visibleMax).toBe(30_000);
+        expect(refs.byBar.get(0)).toBe(1);
+        expect(bubbleScaleMaximum(candidates[0]!, candidates, 'visible')).toBe(30_000);
+        expect(selectVisibleBubbleCandidates(candidates, null, null)).toHaveLength(30_000);
     });
 
     it('scales radius by square-root volume and user percentage', () => {

@@ -28,6 +28,7 @@ import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 import { OrderFlowBubbleLayer } from './order-flow-bubble-layer';
 
 const MAX_BUBBLE_TRADES = 300_000;
+const TRIM_BUBBLE_BATCH = 10_000;
 const BUBBLE_NOTIFY_MS = 48;
 
 function boundedTrades(trades: BubbleSourceTrade[]) {
@@ -146,7 +147,7 @@ export function OrderFlowBubbleIndicator({
                 tradesRef.current.push(trade);
                 if (
                     tradesRef.current.length >
-                    MAX_BUBBLE_TRADES
+                    MAX_BUBBLE_TRADES + TRIM_BUBBLE_BATCH
                 ) {
                     tradesRef.current = boundedTrades(
                         tradesRef.current,

@@ -14,7 +14,8 @@ import {
 import type { ChartColors } from '../../../lib/theme-store';
 import {
     bubbleRadius,
-    bubbleScaleMaximum,
+    bubbleScaleReferences,
+    selectVisibleBubbleCandidates,
     hitTestBubble,
     type BubbleCandidate,
     type BubbleSettings,
@@ -87,7 +88,17 @@ export function OrderFlowBubbleLayer({
             ctx.clearRect(0, 0, width, height);
 
             const timeScale = chart.timeScale();
-            const projected = candidates.flatMap((candidate) => {
+            const visibleRange = timeScale.getVisibleRange();
+            const visibleCandidates = selectVisibleBubbleCandidates(
+                candidates,
+                visibleRange && typeof visibleRange.from === 'number'
+                    ? visibleRange.from
+                    : null,
+                visibleRange && typeof visibleRange.to === 'number'
+                    ? visibleRange.to
+                    : null,
+            );
+            const projected = visibleCandidates.flatMap((candidate) => {
                 const x = timeScale.timeToCoordinate(
                     candidate.timestamp as UTCTimestamp,
                 );
@@ -112,14 +123,16 @@ export function OrderFlowBubbleLayer({
             const visible = projected.map(
                 (item) => item.candidate,
             );
+            const references = bubbleScaleReferences(visible);
 
             const rendered: RenderedBubble[] = [];
             for (const item of projected) {
-                const maximum = bubbleScaleMaximum(
-                    item.candidate,
-                    visible,
-                    settings.scaleMode,
-                );
+                const maximum = settings.scaleMode === 'bar'
+                    ? (
+                        references.byBar.get(item.candidate.timestamp) ??
+                        1
+                    )
+                    : references.visibleMax;
                 const radius = bubbleRadius(
                     item.candidate.volume,
                     maximum,
@@ -181,6 +194,8 @@ export function OrderFlowBubbleLayer({
         timeScale.subscribeVisibleLogicalRangeChange(
             schedule,
         );
+        timeScale.subscribeVisibleTimeRangeChange(schedule);
+        candle.subscribeDataChanged(schedule);
         const resizeObserver = new ResizeObserver(schedule);
         resizeObserver.observe(host);
 
@@ -198,14 +213,22 @@ export function OrderFlowBubbleLayer({
         const onLeave = () => setHovered(null);
         host.addEventListener('mousemove', onMove);
         host.addEventListener('mouseleave', onLeave);
+        // Wheel/pointer captures handle vertical price-scale zoom or drag
+        // that does not necessarily change the visible *time* range.
+        host.addEventListener('wheel', schedule, { passive: true, capture: true });
+        host.addEventListener('pointermove', schedule, true);
 
         return () => {
             timeScale.unsubscribeVisibleLogicalRangeChange(
                 schedule,
             );
+            timeScale.unsubscribeVisibleTimeRangeChange(schedule);
+            candle.unsubscribeDataChanged(schedule);
             resizeObserver.disconnect();
             host.removeEventListener('mousemove', onMove);
             host.removeEventListener('mouseleave', onLeave);
+            host.removeEventListener('wheel', schedule, true);
+            host.removeEventListener('pointermove', schedule, true);
             if (frameRef.current !== null) {
                 window.cancelAnimationFrame(frameRef.current);
                 frameRef.current = null;
