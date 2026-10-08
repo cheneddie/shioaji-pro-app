@@ -86,6 +86,19 @@ describe('Order Flow history cache', () => {
         expect(mocks.fetch).toHaveBeenCalledTimes(2);
     });
 
+    it('re-fetches an active or future trading date instead of caching a partial result', async () => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(new Date('2026-10-08T08:15:00Z'));
+            const { fetchOrderFlowHistory } = await import('./order-flow-history');
+            await fetchOrderFlowHistory(contract, '2026-10-12');
+            await fetchOrderFlowHistory(contract, '2026-10-12');
+            expect(mocks.fetch).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('bounds the request cache and evicts the oldest entry', async () => {
         const { fetchOrderFlowHistory } = await import('./order-flow-history');
         for (let day = 1; day <= 65; day++) {
