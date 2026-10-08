@@ -12,7 +12,8 @@ const STORE = 'ticks';
 const MAX_PENDING = 10_000;
 const FLUSH_BATCH = 500;
 const MAX_READ = 80_000;
-const RETENTION_MS = 72 * 60 * 60 * 1_000;
+// Eight days retain the Thursday night session across a long weekend.
+const RETENTION_MS = 8 * 24 * 60 * 60 * 1_000;
 const MAX_ROWS = 240_000;
 const PRUNE_EVERY = 5_000;
 const TW_OFFSET_MS = 8 * 60 * 60 * 1_000;

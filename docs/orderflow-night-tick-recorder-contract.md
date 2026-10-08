@@ -12,7 +12,7 @@
 ## 本次公開前端已實作的兩層
 
 1. **歷史查詢保護**：`broker-history-eligibility.ts` 對未完成及未來交易日直接 deferred，不查 `RangeTime`；已完成歷史盤仍可按原有 3 個交易日與 80% 閘門載入。畫面改說「當前盤歷史 Tick 尚未發布」，不將 API fallback 誤判為 SSE 掛掉。
-2. **瀏覽器端真實 SSE 保存**：`raw-tick-disk.ts` 僅在 shared SSE owner 對實體商品接收 tick 時，將有效事件以批次寫入 IndexedDB。依 API origin + production/simulation 隔離、按 `physicalCode+TWWallMs` 查詢；全域 bounded queue、最多 8 萬回放、7? **實作實際為 72 小時保存與 24 萬筆全域上限**。前端重整／重開相同 WebView origin 可回放已寫入的資料。
+2. **瀏覽器端真實 SSE 保存**：`raw-tick-disk.ts` 僅在 shared SSE owner 對實體商品接收 tick 時，將有效事件以批次寫入 IndexedDB。依 API origin + production/simulation 隔離、按 `physicalCode+TWWallMs` 查詢；全域 bounded queue、最多 8 萬筆單次回放、**8 天保存時間與 24 萬筆全域上限**。前端重整／重開相同 WebView origin 可回放已寫入的資料。
 
 **這兩層不等於常駐錄製**：所有前端視窗關閉時不會收到任何新 Tick，IndexedDB 亦可能被瀏覽器清理；目前不可宣稱完整夜盤已被保存。
 
