@@ -359,6 +359,25 @@ describe('Bubble settings, scale and hit testing', () => {
         expect(doubled).toBeCloseTo(large * 2);
     });
 
+    it('tracks candle spacing smoothly and retains relative volume sizes', () => {
+        const settings = { minimumRadius: 1, scalePercent: 100 };
+        const spacings = [1, 2, 4, 8, 16, 32, 64];
+        const large = spacings.map((spacing) =>
+            bubbleRadius(100, 100, settings, spacing));
+        const small = spacings.map((spacing) =>
+            bubbleRadius(25, 100, settings, spacing));
+
+        for (let i = 1; i < large.length; i++) {
+            expect(large[i]).toBeGreaterThan(large[i - 1]!);
+            expect(large[i]! / large[i - 1]!).toBeLessThanOrEqual(2.01);
+        }
+        expect(large[0]).toBeLessThan(1);
+        expect(large.at(-1)).toBeGreaterThan(12);
+        for (let i = 0; i < large.length; i++) {
+            expect(small[i]).toBeLessThan(large[i]!);
+        }
+    });
+
     it('hit-tests inside, boundary and outside a rendered circle', () => {
         const bubble = {
             x: 20,

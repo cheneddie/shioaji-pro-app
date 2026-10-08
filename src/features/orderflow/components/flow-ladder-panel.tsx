@@ -20,15 +20,17 @@ import {
 } from '../domain/flow-ladder';
 import * as styles from './flow-ladder-panel.css';
 
+// FlashOrder-inspired symmetric ladder: passive BID/ASK flank PRICE,
+// moving and cumulative traded sides flank the book. No order callbacks.
 const COLS = [
-    { label: 'PRICE', hint: '成交價格階梯' },
-    { label: 'BID', hint: '當前被動買方五檔委託量' },
-    { label: 'M.SEL', hint: '最近 300 秒主動賣量，依最後 Tick 事件時間計算' },
-    { label: 'Δ', hint: 'M.BUY − M.SEL' },
-    { label: 'M.BUY', hint: '最近 300 秒主動買量，依最後 Tick 事件時間計算' },
-    { label: 'ASK', hint: '當前被動賣方五檔委託量' },
-    { label: 'D.BUY', hint: 'Runtime 啟動後累積主動買量；不是完整交易日回補量' },
-    { label: 'D.SEL', hint: 'Runtime 啟動後累積主動賣量；不是完整交易日回補量' },
+    { label: 'D.SEL', hint: 'Runtime 啟動後累積主動賣量（不是完整日量）' },
+    { label: 'M.SEL', hint: '最近 300 秒主動賣量' },
+    { label: 'BID', hint: '當前五檔被動買委託量' },
+    { label: 'PRICE', hint: '價格中心軸（唯讀）' },
+    { label: 'ASK', hint: '當前五檔被動賣委託量' },
+    { label: 'M.BUY', hint: '最近 300 秒主動買量' },
+    { label: 'D.BUY', hint: 'Runtime 啟動後累積主動買量（不是完整日量）' },
+    { label: 'Δ', hint: '最近 300 秒 M.BUY − M.SEL' },
 ] as const;
 
 function display(value: number) {
@@ -64,23 +66,23 @@ function FlowLadderRowView({ row, max, decimals }: {
         <div role='row' data-price={row.price}
             data-last={row.isLast ? 'true' : undefined}
             className={styles.row + (row.isLast ? ' ' + styles.lastRow : '')}>
+            <Cell value={row.dailySell} maximum={max.cumulative} side='sell' />
+            <Cell value={row.movingSell} maximum={max.moving} side='sell' />
+            <Cell value={row.bidSize} maximum={max.book} side='buy' />
             <div role='cell' className={styles.price}>
                 {row.price.toLocaleString('en-US', {
                     minimumFractionDigits: decimals, maximumFractionDigits: decimals,
                 })}
             </div>
-            <Cell value={row.bidSize} maximum={max.book} side='buy' />
-            <Cell value={row.movingSell} maximum={max.moving} side='sell' />
+            <Cell value={row.askSize} maximum={max.book} side='sell' />
+            <Cell value={row.movingBuy} maximum={max.moving} side='buy' />
+            <Cell value={row.dailyBuy} maximum={max.cumulative} side='buy' />
             <div className={styles.numeric}>
                 <span className={styles.value + (delta > 0 ? ' ' + styles.buy :
                     delta < 0 ? ' ' + styles.sell : '')}>
                     {delta > 0 ? '+' : ''}{display(delta)}
                 </span>
             </div>
-            <Cell value={row.movingBuy} maximum={max.moving} side='buy' />
-            <Cell value={row.askSize} maximum={max.book} side='sell' />
-            <Cell value={row.dailyBuy} maximum={max.cumulative} side='buy' />
-            <Cell value={row.dailySell} maximum={max.cumulative} side='sell' />
         </div>
     );
 }
@@ -214,7 +216,7 @@ export function FlowLadderPanel({
         <section className={styles.shell} aria-label='Order Flow 報價'
             data-panel-id={panelId} data-read-only='true'>
             <div className={styles.toolbar}>
-                <span className={styles.title}>FLOW LADDER</span>
+                <span className={styles.title}>FLOW DOM · FLASH 版型</span>
                 {canDayOnly && <>
                     <button type='button' className={styles.button[dayOnly ? 'normal' : 'active']}
                         onClick={() => pickSession('all')}>全盤</button>
@@ -235,8 +237,8 @@ export function FlowLadderPanel({
                 </span>
             </div>
             <div className={styles.notice}>
-                M=最後 Tick 事件時間起算 300 秒；
-                D=本次 Runtime 啟動後累積，非完整交易日量；僅行情分析、不下單
+                BID / ASK 取即時五檔、價格置中；M = 300 秒成交量，
+                D = Runtime 啟動後累計量（非完整日量）。唯讀報價，點擊不會下單
             </div>
             {!canRender && (
                 <div className={styles.empty} role='status'>
@@ -258,7 +260,7 @@ export function FlowLadderPanel({
                         <div className={styles.header} role='row'>
                             {COLS.map((col) => (
                                 <div key={col.label} role='columnheader'
-                                    className={styles.numeric}
+                                    className={col.label === 'PRICE' ? styles.price : styles.numeric}
                                     title={col.hint}>{col.label}</div>
                             ))}
                         </div>

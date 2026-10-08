@@ -39,7 +39,7 @@ export const table = style({
 });
 export const row = style({
     display: 'grid',
-    gridTemplateColumns: 'minmax(66px,1.1fr) minmax(55px,1fr) minmax(65px,1fr) minmax(60px,1fr) minmax(65px,1fr) minmax(55px,1fr) minmax(66px,1.1fr) minmax(82px,1.3fr)',
+    gridTemplateColumns: 'minmax(65px,1fr) minmax(62px,1fr) minmax(55px,0.9fr) minmax(85px,1.25fr) minmax(55px,0.9fr) minmax(62px,1fr) minmax(65px,1fr) minmax(60px,0.9fr)',
     width: '100%',
     height: 27, alignItems: 'center', gap: 0,
     borderBottom: '1px solid ' + vars.color.border,
@@ -61,9 +61,20 @@ export const meter = style({
     opacity: 0.22, pointerEvents: 'none',
 });
 export const price = style([
-    numeric, { justifyContent: 'center', fontWeight: 700, color: vars.color.foreground },
+    numeric, {
+        justifyContent: 'center',
+        fontWeight: 700,
+        color: vars.color.foreground,
+        background: vars.color.panel,
+        borderLeft: '1px solid ' + vars.color.border,
+        borderRight: '1px solid ' + vars.color.border,
+    },
 ]);
-export const lastRow = style({ background: vars.color.muted });
+export const lastRow = style({
+    background: vars.color.muted,
+    outline: '1px solid ' + vars.color.accent,
+    outlineOffset: '-1px',
+});
 export const buy = style({ color: vars.color.up });
 export const sell = style({ color: vars.color.down });
 export const empty = style({

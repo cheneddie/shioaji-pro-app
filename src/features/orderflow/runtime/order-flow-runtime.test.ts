@@ -178,6 +178,21 @@ describe('shared OrderFlowRuntime ownership', () => {
         expect(mocks.releaseFns.every((fn) => fn.mock.calls.length === 1)).toBe(true);
     });
 
+    it('releases all shared raw subscriptions across 100 retain/release cycles', async () => {
+        const { getOrderFlowRuntime } = await import('./order-flow-runtime');
+        for (let i = 0; i < 100; i++) {
+            const runtime = getOrderFlowRuntime(contract, 'all');
+            const release = runtime.retain();
+            release();
+        }
+        expect(mocks.retain).toHaveBeenCalledTimes(200);
+        expect(mocks.offTick).toHaveBeenCalledTimes(100);
+        expect(mocks.offBook).toHaveBeenCalledTimes(100);
+        expect(mocks.offStatus).toHaveBeenCalledTimes(100);
+        expect(mocks.releaseFns).toHaveLength(200);
+        expect(mocks.releaseFns.every((fn) => fn.mock.calls.length === 1)).toBe(true);
+    });
+
     it('partitions runtime identity by symbol, physical source and session and removes disposed instances from the registry', async () => {
         const { getOrderFlowRuntime } = await import('./order-flow-runtime');
         const all = getOrderFlowRuntime(contract, 'all');

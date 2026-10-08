@@ -529,26 +529,22 @@ export function bubbleRadius(
         settings.scalePercent > 0
             ? settings.scalePercent / 100
             : 1;
-    const minimumRadius =
-        Math.max(0.5, settings.minimumRadius) * userScale;
-    const adaptiveMaximum =
-        Math.max(
-            minimumRadius,
-            Math.min(
-                40,
-                Math.max(8, Math.max(1, barWidth) * 0.45),
-            ) * userScale,
-        );
-    const ratio = Math.sqrt(
-        Math.max(
-            0,
-            volume / Math.max(1, scaleMaximum),
-        ),
+    // Track actual chart bar spacing, including sub-pixel compressed slots.
+    // Avoid fixed minimum/maximum radii that flattened volume differences
+    // when zoomed out and produced discontinuous jumps during zoom.
+    const spacing = Number.isFinite(barWidth)
+        ? Math.max(0.25, barWidth)
+        : 1;
+    const maximumRadius = Math.min(40, spacing * 0.45) * userScale;
+    const minimumRadius = Math.min(
+        Math.max(0.25, settings.minimumRadius) * userScale,
+        maximumRadius * 0.35,
     );
-    return Math.max(
-        minimumRadius,
-        adaptiveMaximum * Math.min(1, ratio),
-    );
+    const ratio = Math.sqrt(Math.max(
+        0,
+        volume / Math.max(1, scaleMaximum),
+    ));
+    return Math.max(minimumRadius, maximumRadius * Math.min(1, ratio));
 }
 
 export function hitTestBubble(
