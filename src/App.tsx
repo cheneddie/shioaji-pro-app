@@ -13,6 +13,7 @@ import { BottomDock } from './components/bottom-dock';
 import { AsyncStatus, type AsyncPhase } from './components/async-status';
 import { CandleChart } from './components/candle-chart';
 import { FootprintPanel } from './features/orderflow/components/footprint-panel';
+import { FlowLadderPanel } from './features/orderflow/components/flow-ladder-panel';
 import { OrderFlowKlinePanel } from './features/orderflow/components/order-flow-kline-panel';
 import { ChipsCard } from './components/chips-card';
 import { ComboListPanel } from './components/combo-list';
@@ -130,6 +131,7 @@ const POPOUT_TYPES: ReadonlySet<string> = new Set([
     'chart',
     'orderflow_kline',
     'footprint',
+    'flowladder',
     'intraday',
     'depth',
     'ticket',
@@ -272,6 +274,19 @@ function BlockBody({
         case 'footprint':
             return contract ? (
                 <FootprintPanel
+                    panelId={block.id}
+                    contract={contract}
+                    sessionMode={block.chartSession}
+                    onSessionModeChange={(chartSession) =>
+                        onSessionConfigChange(block.id, { chartSession })
+                    }
+                />
+            ) : (
+                <BlockPlaceholder phase={missingContractPhase} />
+            );
+        case 'flowladder':
+            return contract ? (
+                <FlowLadderPanel
                     panelId={block.id}
                     contract={contract}
                     sessionMode={block.chartSession}
@@ -502,6 +517,9 @@ function indexBlockMessage(type: BlockType): string | null {
     if (type === 'footprint') {
         return '指數沒有逐筆 Tick 串流，Footprint 不支援';
     }
+    if (type === 'flowladder') {
+        return '指數缺少逐筆 Tick 與五檔委託簿，Order Flow 報價不支援';
+    }
     if (type === 'flash' || type === 'grid' || type === 'oddspread') {
         return '指數商品不可下單';
     }
@@ -690,6 +708,15 @@ function PopoutView({
             case 'orderflow_kline':
                 body = (
                     <OrderFlowKlinePanel
+                        contract={contract}
+                        sessionMode={popoutChartSession}
+                    />
+                );
+                break;
+            case 'flowladder':
+                body = (
+                    <FlowLadderPanel
+                        panelId='popout-flowladder'
                         contract={contract}
                         sessionMode={popoutChartSession}
                     />

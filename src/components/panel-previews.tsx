@@ -209,6 +209,18 @@ export const PANEL_PREVIEWS: Record<BlockType, ReactNode> = {
             <line x1='8' y1='69' x2='112' y2='69' stroke={accent} strokeOpacity='0.7' />
         </Frame>
     ),
+    flowladder: (
+        <Frame>
+            {[0, 1, 2, 3, 4].map((index) => (
+                <g key={index}>
+                    <Ln x={8} y={9 + index * 13} w={18} color={up} o={0.6} />
+                    <Ln x={34} y={9 + index * 13} w={22} color={down} o={0.5} />
+                    <Ln x={64} y={9 + index * 13} w={18} color={accent} o={0.8} />
+                    <Ln x={90} y={9 + index * 13} w={20} color={up} o={0.5} />
+                </g>
+            ))}
+        </Frame>
+    ),
     intraday: (
         <Frame>
             <line

@@ -196,6 +196,25 @@ describe('shared OrderFlowRuntime ownership', () => {
     });
 });
 
+describe('Development 7 day-session partition', () => {
+    it('excludes off-session Tick and BidAsk before day runtime aggregation', async () => {
+        const { getOrderFlowRuntime } = await import('./order-flow-runtime');
+        const runtime = getOrderFlowRuntime(contract, 'day');
+        const release = runtime.retain();
+        mocks.tickListener!(tick('10:00:00.000', { volume: 2 }));
+        mocks.bookListener!(book('10:00:00.000', 4, 5));
+        mocks.tickListener!(tick('16:00:00.000', { volume: 9, totalVolume: 109 }));
+        mocks.bookListener!(book('16:00:00.000', 44, 55));
+        const snapshot = runtime.getSnapshot();
+        expect(snapshot.health.tradeTickCount).toBe(1);
+        expect(snapshot.health.bookCount).toBe(1);
+        const row = snapshot.levels.find((level) => level.price === 27110);
+        expect(row?.dailyBuy).toBe(2);
+        expect(row?.askSize).toBe(5);
+        release();
+    });
+});
+
 describe('OrderFlowRuntime aggregation and health', () => {
     it('aggregates every raw event synchronously but batches subscriber notifications', async () => {
         const { getOrderFlowRuntime } = await import('./order-flow-runtime');

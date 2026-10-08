@@ -48,6 +48,7 @@ export type BlockType =
     | 'chart'
     | 'orderflow_kline'
     | 'footprint'
+    | 'flowladder'
     | 'intraday'
     | 'intradaywall'
     | 'depth'
@@ -121,7 +122,8 @@ export function popoutSessionParam(block: Block): Record<string, string> {
     const session =
         block.type === 'chart' ||
         block.type === 'orderflow_kline' ||
-        block.type === 'footprint'
+        block.type === 'footprint' ||
+        block.type === 'flowladder'
             ? block.chartSession
             : block.type === 'intraday'
               ? block.intradaySession
@@ -234,6 +236,14 @@ export const BLOCK_META: Record<
         pinnable: true,
         singleton: false,
         defaultSize: { w: 10, h: 12, minW: 6, minH: 7 },
+    },
+    flowladder: {
+        label: 'Order Flow 報價',
+        description: '唯讀價格梯、五檔、300 秒主動量與啟動後累積量',
+        category: 'market',
+        pinnable: true,
+        singleton: false,
+        defaultSize: { w: 8, h: 12, minW: 5, minH: 7 },
     },
     intraday: {
         label: '當日走勢',

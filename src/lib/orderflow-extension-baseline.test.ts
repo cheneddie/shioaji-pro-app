@@ -33,7 +33,7 @@ describe('Order Flow extension native-panel baseline', () => {
         },
     );
 
-    it('keeps Development 3 K-line and adds Development 4 Footprint without future panels', () => {
+    it('keeps Development 3–7 independent Order Flow panels registered without touching native routes', () => {
         expect(BLOCK_META.orderflow_kline).toMatchObject({
             category: 'market',
             pinnable: true,
@@ -46,7 +46,10 @@ describe('Order Flow extension native-panel baseline', () => {
             singleton: false,
         });
         expect(switchCaseBody('footprint')).toContain('<FootprintPanel');
-        expect('flowladder' in BLOCK_META).toBe(false);
+        expect(BLOCK_META.flowladder).toMatchObject({
+            category: 'market', pinnable: true, singleton: false,
+        });
+        expect(switchCaseBody('flowladder')).toContain('<FlowLadderPanel');
     });
 
     it('keeps Footprint isolated from native panels and direct market subscriptions', () => {
@@ -80,7 +83,22 @@ describe('Order Flow extension native-panel baseline', () => {
         expect(bubble).toMatch(/runtime\s*\.\s*loadHistory\s*\(/);
         expect(bubble).not.toContain("from '../../../lib/stream'");
         expect(bubble).not.toContain('retainQuote');
-        expect('flowladder' in BLOCK_META).toBe(false);
+        expect('flowladder' in BLOCK_META).toBe(true);
+    });
+
+    it('keeps Flow Ladder read-only and on the shared runtime', () => {
+        const source = readFileSync(
+            new URL('../features/orderflow/components/flow-ladder-panel.tsx', import.meta.url),
+            'utf8',
+        );
+        expect(source).toContain('getOrderFlowRuntime');
+        expect(source).toContain('runtime.subscribe');
+        expect(source).not.toContain('retainQuote');
+        expect(source).not.toContain("from '../../../lib/stream'");
+        expect(source).not.toContain('placeOrder');
+        expect(source).not.toContain('placeQuickOrder');
+        expect(source).not.toContain("from '../../../components/flash-order'");
+        expect(source).not.toContain("from '../../../components/depth-ladder'");
     });
 
     it('keeps the Order Flow K-line isolated from native execution, indicator and drawing implementations', () => {

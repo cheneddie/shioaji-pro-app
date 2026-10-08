@@ -1,6 +1,7 @@
 // src/features/orderflow/runtime/order-flow-runtime.ts
 
 import { getApiBase } from '../../../lib/runtime';
+import { isDaySessionTick } from '../../../lib/intraday-session';
 import { retainQuote } from '../../../lib/quote-ownership';
 import {
     ensureStream,
@@ -26,6 +27,7 @@ import {
 } from './market-event-bridge';
 import { fetchOrderFlowHistory } from './order-flow-history';
 import { TickAggregator } from './tick-aggregator';
+import { parseExchangeEventTimeMs } from './event-time';
 
 type Listener = () => void;
 
@@ -246,6 +248,16 @@ export class OrderFlowRuntime {
         this.stopTick = subscribeOrderFlowTicks(
             this.identity.symbol,
             (tick) => {
+                // The identity 'day' is a real market-data partition, not
+                // merely a cache key. Filter at the shared aggregation gate
+                // so Footprint, Kline and Flow Ladder see the same session.
+                if (this.session === 'day') {
+                    const eventMs = parseExchangeEventTimeMs(tick.date, tick.time);
+                    if (eventMs === null ||
+                        !isDaySessionTick(this.contract.security_type, eventMs / 1000)) {
+                        return;
+                    }
+                }
                 // Every raw event changes runtime health counters/time even
                 // when it is simtrade or zero-volume and therefore excluded
                 // from executed-flow totals. Fan-out happens only after the
@@ -268,6 +280,13 @@ export class OrderFlowRuntime {
         this.stopBook = subscribeOrderFlowBooks(
             this.identity.symbol,
             (book) => {
+                if (this.session === 'day') {
+                    const eventMs = parseExchangeEventTimeMs(book.date, book.time);
+                    if (eventMs === null ||
+                        !isDaySessionTick(this.contract.security_type, eventMs / 1000)) {
+                        return;
+                    }
+                }
                 this.bookAggregator.ingest(book);
                 this.invalidate();
             },

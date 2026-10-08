@@ -74,6 +74,7 @@ const PANEL_ICONS: Record<BlockType, LucideIcon> = {
     chart: LineChart,
     orderflow_kline: LineChart,
     footprint: Rows,
+    flowladder: Rows,
     intraday: ChartSpline,
     intradaywall: Grid2x2,
     depth: Layers,
