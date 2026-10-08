@@ -1,6 +1,6 @@
 // Dev6 UI contract: new OrderFlow Kline drawing only, isolated persistence.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { RefObject } from 'react';
 import type { ContractInfo } from '../../../lib/types/contract';
@@ -77,13 +77,22 @@ async function flush() {
 }
 
 beforeEach(() => {
-    localStorage.clear();
+    const map = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => map.get(key) ?? null,
+        setItem: (key: string, value: string) => { map.set(key, value); },
+        clear: () => map.clear(),
+        removeItem: (key: string) => { map.delete(key); },
+    });
+    vi.stubGlobal('window', { devicePixelRatio: 1 });
     click = null;
     vi.clearAllMocks();
     mock.retain.mockImplementation(() => mock.release);
     mock.subscribeTicks.mockImplementation(() => mock.off);
     mock.load.mockResolvedValue({ date: '2026-10-08', ticks: [] });
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Dev6 isolated Order Flow Volume Profile drawing', () => {
     it('creates, persists, selects and deletes a two-click drawing without order commands', async () => {
