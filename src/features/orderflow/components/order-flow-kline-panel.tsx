@@ -38,6 +38,7 @@ import { getOrderFlowRuntime } from '../runtime/order-flow-runtime';
 import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 import type { OrderFlowKlineTrade } from '../domain/kline';
 import { OrderFlowBubbleIndicator } from './order-flow-bubble-indicator';
+import { OrderFlowVolumeProfileDrawingLayer } from './order-flow-volume-profile';
 import * as styles from './order-flow-kline-panel.css';
 
 const TIMEFRAMES = [
@@ -112,6 +113,7 @@ export function OrderFlowKlinePanel({
     const [empty, setEmpty] = useState(false);
     const [chartReady, setChartReady] = useState(false);
     const [indicatorOpen, setIndicatorOpen] = useState(false);
+    const [vpDrawingActive, setVpDrawingActive] = useState(false);
     const [bubbleSettings, setBubbleSettings] = useState<BubbleSettings>(
         () => loadBubbleSettings(panelId),
     );
@@ -438,6 +440,14 @@ export function OrderFlowKlinePanel({
                 >
                     指標
                 </button>
+                <button
+                    type='button'
+                    title='在 Order Flow K 線上依序點選範圍起點與終點'
+                    className={styles.button[vpDrawingActive ? 'active' : 'normal']}
+                    onClick={() => setVpDrawingActive((value) => !value)}
+                >
+                    VP 畫圖
+                </button>
                 <span className={styles.badge}>ORDER FLOW</span>
                 <RefreshButton
                     label='更新歷史'
@@ -619,6 +629,22 @@ export function OrderFlowKlinePanel({
                 </div>
             )}
             <div ref={hostRef} className={styles.host}>
+                {chartReady && (
+                    <OrderFlowVolumeProfileDrawingLayer
+                        panelId={panelId}
+                        contract={contract}
+                        timeframeMinutes={tf.minutes}
+                        dayOnly={dayOnly}
+                        runtimeSession={runtimeSession}
+                        historyRevision={historyRevision}
+                        active={vpDrawingActive}
+                        onActiveChange={setVpDrawingActive}
+                        hostRef={hostRef}
+                        chartRef={chartRef}
+                        candleRef={candleRef}
+                        colors={colors}
+                    />
+                )}
                 {chartReady && bubbleSettings.enabled && (
                     <OrderFlowBubbleIndicator
                         contract={contract}
