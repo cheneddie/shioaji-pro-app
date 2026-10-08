@@ -146,6 +146,7 @@ export function OrderFlowBubbleIndicator({
         let truncated = false;
         let ownerIncomplete = false;
         let inFlight = 0;
+        let scheduledSignature = '';
 
         generationRef.current++;
         historyRef.current.clear();
@@ -203,7 +204,9 @@ export function OrderFlowBubbleIndicator({
         replayRef.current = replay.ticks.map(raw => bubbleTradeFromRaw(
             raw, timeframeMinutes, contract.security_type, dayOnly,
         )).filter((value): value is BubbleSourceTrade => value !== null);
-        commit(markTruncated);
+        // Unsupported (e.g. 1D) charts must never briefly render bubbles
+        // from a partial in-memory replay during their initial debounce.
+        if ([1, 5, 15, 60].includes(timeframeMinutes)) commit(markTruncated);
 
         const load = () => {
             const range = subscribedChart?.timeScale().getVisibleRange();
@@ -229,7 +232,7 @@ export function OrderFlowBubbleIndicator({
             }
             commit(markTruncated);
             updateCoverage();
-            if (plan.unsupportedCalendar || blocked) return;
+            if (plan.unsupportedCalendar || blocked || plan.slices.length === 0) return;
             // A follower may have opened after the main SSE window received
             // trades. Request the owner's physical-code ring for this viewport.
             void runtime.ownerReplayTicks(
@@ -286,7 +289,24 @@ export function OrderFlowBubbleIndicator({
         };
         const schedule = () => {
             if (cancelled) return;
-            generationRef.current++; // queued old work is now obsolete
+            const range = subscribedChart?.timeScale().getVisibleRange();
+            if (!range || typeof range.from !== 'number' ||
+                typeof range.to !== 'number') return;
+            const next = planVisibleTickSlices(
+                contract.security_type, dayOnly, timeframeMinutes,
+                range.from, range.to,
+            );
+            // Candle data-change fires on EVERY live Tick. Invalidating the
+            // debounce each time would starve history in an active market.
+            // Only materially different aligned slices / range limits reload.
+            const signature = JSON.stringify([
+                next.unsupportedCalendar, next.unsupportedTimeframe,
+                next.omittedDates, ...next.selectedDates,
+                ...next.slices.map(sliceId),
+            ]);
+            if (signature === scheduledSignature) return;
+            scheduledSignature = signature;
+            generationRef.current++; // queued old viewport work is obsolete
             if (debounce) clearTimeout(debounce);
             debounce = setTimeout(load, DEBOUNCE_MS);
         };
