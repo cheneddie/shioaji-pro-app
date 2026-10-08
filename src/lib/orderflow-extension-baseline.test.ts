@@ -86,6 +86,12 @@ describe('Order Flow extension native-panel baseline', () => {
         expect('flowladder' in BLOCK_META).toBe(true);
     });
 
+    it('rejects unsupported combo contracts before mounting Flow Ladder', () => {
+        const guard = appSource.slice(appSource.indexOf('function comboBlockMessage('));
+        expect(guard).toContain("if (type === 'flowladder')");
+        expect(guard).toContain('組合商品報價不支援單商品逐價位');
+    });
+
     it('keeps Flow Ladder read-only and on the shared runtime', () => {
         const source = readFileSync(
             new URL('../features/orderflow/components/flow-ladder-panel.tsx', import.meta.url),

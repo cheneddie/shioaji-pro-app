@@ -69,3 +69,5 @@ CI: \`pnpm test\` and \`pnpm run build\`.
 ## QA limitation
 
 Only frontend/unit tests and CI can be verified in GitHub automation. A compatible Tauri dev shell, live broker SSE/heartbeat, trading-day reset/full-session history, and real browser hover/scroll/virtualization under live high-volume ticks require isolated on-device QA. Do not claim execution, desktop, or brokerage certification on the basis of frontend CI.
+
+- Contract combos are rejected before mounting Flow Ladder because a multi-leg synthetic book is not a single-instrument passive price ladder.

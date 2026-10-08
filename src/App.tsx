@@ -537,6 +537,9 @@ function IndexBlockUnavailable({ type }: { type: BlockType }) {
 // 組合商品是行情/圖表身分 — 下單類面板要導向組合單（整體 action ×
 // 組合型別的展開語意，一般單腿下單面板無法表達）
 function comboBlockMessage(type: BlockType): string | null {
+    if (type === 'flowladder') {
+        return '組合商品報價不支援單商品逐價位 Order Flow 階梯';
+    }
     if (type === 'ticket' || type === 'grid' || type === 'flash' || type === 'oddspread') {
         return '組合商品請使用「組合單」面板下單';
     }
