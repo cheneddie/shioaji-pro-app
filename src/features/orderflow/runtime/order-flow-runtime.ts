@@ -2,6 +2,7 @@
 
 import { getApiBase } from '../../../lib/runtime';
 import { readRecordedRawTicks } from '../../../lib/raw-tick-disk';
+import { fetchSidecarRecordedTicks } from './sidecar-tick-recorder';
 import { isDaySessionTick } from '../../../lib/intraday-session';
 import { retainQuote } from '../../../lib/quote-ownership';
 import {
@@ -178,6 +179,22 @@ export class OrderFlowRuntime {
      */
     async browserRecordedTicks(fromMs: number, toMs: number) {
         const replay = await readRecordedRawTicks(sourceCodeOf(this.contract), fromMs, toMs);
+        return {
+            ...replay,
+            ticks: replay.ticks.map(raw => ({
+                ...normalizeOrderFlowTick(raw),
+                code: this.identity.symbol,
+            })),
+        };
+    }
+
+    /** Query a native disk-backed recorder ONLY when this Sidecar advertises
+     * recorder v1. A missing endpoint or capability is never polled.
+     */
+    async sidecarRecordedTicks(fromMs: number, toMs: number) {
+        const replay = await fetchSidecarRecordedTicks(
+            sourceCodeOf(this.contract), fromMs, toMs,
+        );
         return {
             ...replay,
             ticks: replay.ticks.map(raw => ({

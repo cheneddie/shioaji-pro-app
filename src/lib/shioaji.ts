@@ -64,6 +64,8 @@ export interface ServerInfo {
     /** SDK 1.7.8+：sidecar 程序的 instance id（每次啟動不同） */
     instance_id?: string;
     agent_harness?: Health['agent_harness'];
+    /** Optional private Sidecar feature, absent on older builds. */
+    orderflow_recorder?: { enabled: boolean; version: number };
 }
 
 function contractKey(c: ContractBase) {
