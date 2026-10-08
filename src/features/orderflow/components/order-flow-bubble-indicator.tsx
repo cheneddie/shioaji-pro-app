@@ -235,9 +235,11 @@ export function OrderFlowBubbleIndicator({
             if (plan.unsupportedCalendar || blocked || plan.slices.length === 0) return;
             // A follower may have opened after the main SSE window received
             // trades. Request the owner's physical-code ring for this viewport.
+            // Replay only the selected/latest-three slices, not the full
+            // zoomed-out Kbar history (which can span months).
             void runtime.ownerReplayTicks(
-                Math.min(range.from, range.to) * 1000 - timeframeMinutes * 60_000,
-                Math.max(range.from, range.to) * 1000,
+                Math.min(...plan.slices.map(s => s.fromMs)),
+                Math.max(...plan.slices.map(s => s.toMs)),
             ).then(owner => {
                 if (cancelled || generation !== generationRef.current) return;
                 ownerIncomplete = owner.truncated || owner.missingOwner;
