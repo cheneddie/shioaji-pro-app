@@ -1299,8 +1299,20 @@ export function CandleChart({
         saveInstances(list);
     };
     // 點選指標 → 先開設定（圖上即時預覽），確定才算加入、取消整個撤掉
+    const flowTypeDefaultsKey = storageScope ? `sj-pro-orderflow-ind-defaults-${storageScope}` : null;
     const addIndicator = (type: string) => {
-        const inst = newInstance(type);
+        let inst = newInstance(type);
+        if (flowTypeDefaultsKey) {
+            try {
+                const all = JSON.parse(localStorage.getItem(flowTypeDefaultsKey) ?? '{}') as Record<string, Partial<IndicatorInstance>>;
+                const saved = all[type];
+                if (saved) inst = { ...inst, params: { ...inst.params, ...saved.params },
+                    ...(saved.styles ? { styles: saved.styles } : {}),
+                    ...(saved.precision !== undefined ? { precision: saved.precision } : {}),
+                    ...(saved.showLabels !== undefined ? { showLabels: saved.showLabels } : {}),
+                    ...(saved.showValues !== undefined ? { showValues: saved.showValues } : {}) };
+            } catch { /* invalid Flow defaults: use built-in definition */ }
+        }
         settingsRevisionRef.current = panelState?.revision ?? '';
         settingsNewRef.current = true;
         setSettingsDraft(inst);
@@ -1342,11 +1354,18 @@ export function CandleChart({
         next.splice(to, 0, item!);
         commitInstances(next);
     };
+    const flowFavsKey = storageScope ? `sj-pro-orderflow-ind-favorites-${storageScope}` : null;
     const toggleFavorite = (type: string) => {
-        const favs = loadFavorites();
+        const favs = flowFavsKey ? (() => {
+            try { return new Set<string>(JSON.parse(localStorage.getItem(flowFavsKey) ?? '[]') as string[]); }
+            catch { return new Set<string>(); }
+        })() : loadFavorites();
         if (favs.has(type)) favs.delete(type);
         else favs.add(type);
-        saveFavorites(favs);
+        if (flowFavsKey) {
+            try { localStorage.setItem(flowFavsKey, JSON.stringify([...favs])); }
+            catch { /* keep Flow-only preference transient */ }
+        } else saveFavorites(favs);
     };
     const cancelSettings = () => {
         setSettingsDraft(null);
@@ -2015,6 +2034,7 @@ export function CandleChart({
                         instances={instances}
                         onAdd={addIndicator}
                         onClose={() => setPickerOpen(false)}
+                        favoritesStorageKey={flowFavsKey ?? undefined}
                         extraIndicator={extension?.indicator && {
                             ...extension.indicator,
                             onSelect: () => {
@@ -2039,6 +2059,17 @@ export function CandleChart({
                             patchInstance(settingsInst.id, patch)
                         }
                         onRemove={() => removeIndicator(settingsInst.id)}
+                        onSaveTypeDefault={flowTypeDefaultsKey ? (inst) => {
+                            try {
+                                const all = JSON.parse(localStorage.getItem(flowTypeDefaultsKey) ?? '{}') as Record<string, unknown>;
+                                localStorage.setItem(flowTypeDefaultsKey, JSON.stringify({
+                                    ...all,
+                                    [inst.type]: { params: inst.params, styles: inst.styles,
+                                        precision: inst.precision, showLabels: inst.showLabels,
+                                        showValues: inst.showValues },
+                                }));
+                            } catch { /* Flow defaults remain unsaved */ }
+                        } : undefined}
                         onCommit={commitSettings}
                         onCancel={cancelSettings}
                     />

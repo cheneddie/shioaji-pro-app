@@ -90,11 +90,14 @@ export function IndicatorDialog({
     onClose,
     onSaveDefaults,
     extraIndicator,
+    favoritesStorageKey,
 }: {
     instances: IndicatorInstance[];
     onAdd: (type: string) => void;
     onClose: () => void;
     onSaveDefaults?: () => void;
+    /** Isolated favorites for optional Flow chart; native default stays global. */
+    favoritesStorageKey?: string;
     /** Only populated by the optional Flow chart extension. */
     extraIndicator?: {
         label: string;
@@ -105,7 +108,11 @@ export function IndicatorDialog({
 }) {
     const [query, setQuery] = useState('');
     const [category, setCategory] = useState<Category>('all');
-    const [favs, setFavs] = useState<Set<string>>(loadFavorites);
+    const [favs, setFavs] = useState<Set<string>>(() => {
+        if (!favoritesStorageKey) return loadFavorites();
+        try { return new Set<string>(JSON.parse(localStorage.getItem(favoritesStorageKey) ?? '[]') as string[]); }
+        catch { return new Set<string>(); }
+    });
     // null = 關閉；{ existing: null } = 建立新自訂指標
     const [editorFor, setEditorFor] = useState<{
         existing: CustomIndicator | null;
@@ -125,7 +132,10 @@ export function IndicatorDialog({
             const next = new Set(prev);
             if (next.has(type)) next.delete(type);
             else next.add(type);
-            saveFavorites(next);
+            if (favoritesStorageKey) {
+                try { localStorage.setItem(favoritesStorageKey, JSON.stringify([...next])); }
+                catch { /* Flow preference remains in memory */ }
+            } else saveFavorites(next);
             return next;
         });
     };
@@ -488,6 +498,7 @@ export function IndicatorSettingsModal({
     onRemove,
     onCommit,
     onCancel,
+    onSaveTypeDefault,
 }: {
     inst: IndicatorInstance;
     timeframes: { label: string; minutes: number }[];
@@ -495,6 +506,7 @@ export function IndicatorSettingsModal({
     onRemove: () => void;
     onCommit: () => void;
     onCancel: () => void;
+    onSaveTypeDefault?: (inst: IndicatorInstance) => void;
 }) {
     const def = DEF_BY_TYPE.get(inst.type);
     const [tab, setTab] = useState<'inputs' | 'style' | 'visibility'>(
@@ -851,7 +863,8 @@ export function IndicatorSettingsModal({
                                 <button
                                     className={styles.defaultsItem}
                                     onClick={() => {
-                                        saveTypeDefault(inst);
+                                        if (onSaveTypeDefault) onSaveTypeDefault(inst);
+                                        else saveTypeDefault(inst);
                                         setDefaultsOpen(false);
                                         setSavedTip(true);
                                         setTimeout(
