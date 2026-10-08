@@ -1,7 +1,7 @@
 // src/features/orderflow/runtime/order-flow-history.ts
 
 import { getApiBase } from '../../../lib/runtime';
-import { fetchHistoryTicks } from '../../../lib/shioaji';
+import { quotaGuardedOrderFlowAllDay } from './order-flow-query-coordinator';
 import { dateStrOffset } from '../../../lib/utils/kbars';
 import type { ContractBase } from '../../../lib/types/contract';
 import {
@@ -52,7 +52,7 @@ export function fetchOrderFlowHistory(
         // datasets. A night-session date can be days ahead of wall-clock
         // today; do not cache an empty/partial intraday API result forever.
         const completedTradingDate = date < dateStrOffset(0);
-        request = fetchHistoryTicks(contract, date).then((source) => {
+        request = quotaGuardedOrderFlowAllDay(contract, date).then((source) => {
             const count = Math.max(
                 source.datetime.length,
                 source.close.length,

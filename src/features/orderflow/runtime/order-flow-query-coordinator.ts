@@ -244,3 +244,50 @@ export function fetchOrderFlowVisibleSlice(
     }
     return promise;
 }
+
+// Legacy Footprint and Order Flow VP consumers must use the SAME lock and
+// quota gate as visible bubbles. Keep their existing AllDay semantics; do not
+// silently change the dataset shape relied upon by these native-free panels.
+export async function quotaGuardedOrderFlowAllDay(
+    contract: ContractBase,
+    date: string,
+): Promise<HistoryTicks> {
+    if (typeof navigator === 'undefined' || !navigator.locks?.request)
+        throw new Error('無跨視窗請求鎖，拒絕歷史 Tick 查詢');
+    return navigator.locks.request(lockName(), async () => {
+        let last: number;
+        try {
+            last = Number(localStorage.getItem(stampName()) ?? '0');
+            if (!Number.isFinite(last) || last < 0) throw Error('invalid stamp');
+        } catch {
+            throw new Error('無法確認歷史查詢節流狀態，未送出 Tick');
+        }
+        const interval = Math.max(0, last + INTERVAL_MS - Date.now());
+        if (interval) await new Promise<void>(resolve => setTimeout(resolve, interval));
+        let usage: Usage;
+        try {
+            usage = parseUsage(await apiGet<Usage>('/api/v1/auth/usage'));
+        } catch {
+            throw new Error('無法確認流量額度，未送出歷史查詢');
+        }
+        const quota = quotaState(usage);
+        if (quota.percent === null) throw new Error('流量額度上限未知，未送出歷史查詢');
+        if (usage.remaining_bytes === 0 || quota.percent >= 80)
+            throw new Error('歷史行情流量已用 ' + quota.percent.toFixed(1) + '%，已停止補載成交氣泡');
+        try {
+            localStorage.setItem(stampName(), String(Date.now()));
+        } catch {
+            throw new Error('無法記錄跨視窗查詢節流狀態，未送出 Tick');
+        }
+        let raw: HistoryTicks;
+        try {
+            raw = await fetchHistoryTicks(contract, date);
+        } finally {
+            // Every historical Tick request triggers an after-query refresh;
+            // subsequent queries require their own verified preflight.
+            try { parseUsage(await apiGet<Usage>('/api/v1/auth/usage')); }
+            catch { /* next request fails closed on its own preflight */ }
+        }
+        return raw;
+    });
+}

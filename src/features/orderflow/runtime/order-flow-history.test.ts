@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     fetch: vi.fn(),
+    usage: vi.fn(),
     base: 'fixture',
 }));
 
@@ -10,6 +11,9 @@ vi.mock('../../../lib/runtime', () => ({
 }));
 vi.mock('../../../lib/shioaji', () => ({
     fetchHistoryTicks: mocks.fetch,
+}));
+vi.mock('../../../lib/api', () => ({
+    apiGet: mocks.usage,
 }));
 
 const contract = {
@@ -34,8 +38,22 @@ const payload = {
 beforeEach(() => {
     vi.resetModules();
     mocks.fetch.mockReset().mockResolvedValue(payload);
+    mocks.usage.mockReset().mockResolvedValue({
+        connections: 1, bytes: 10, limit_bytes: 100, remaining_bytes: 90,
+    });
+    // The legacy-cache tests verify historical coalescing. Quota enforcement
+    // and 2s throttling have dedicated tests with real shared stamp semantics.
+    vi.stubGlobal('localStorage', {
+        getItem: () => null,
+        setItem: () => undefined,
+    });
+    vi.stubGlobal('navigator', {
+        locks: { request: async (_name: string, callback: () => unknown) => callback() },
+    });
     mocks.base = 'fixture';
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Order Flow history cache', () => {
     it('coalesces concurrent and completed requests for the same contract/date', async () => {
