@@ -66,6 +66,7 @@ const runtime = vi.hoisted(() => {
         subscribe,
         getSnapshot,
         loadHistory,
+        bufferedTicks: vi.fn(() => ({ ticks: [], truncated: false })),
         emitTick(tick: unknown) {
             tickListener?.(tick);
         },
