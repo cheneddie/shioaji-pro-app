@@ -1,43 +1,60 @@
-// Development 8 — isolated view composition. Native components remain unmodified.
-import { useState } from 'react';
-import { CandleChart } from '../../../components/candle-chart';
+// Unified Flow K-line: native chart capabilities with additive Order Flow overlays.
+// The original `chart` block never supplies an extension prop.
+import { useEffect, useState } from 'react';
+import { CandleChart, type CandleChartExtension } from '../../../components/candle-chart';
 import { QuoteBoard } from '../../../components/quote-board';
 import type { ChartSessionMode } from '../../../lib/intraday-session';
 import type { ContractInfo } from '../../../lib/types/contract';
 import type { Trade } from '../../../lib/types/order';
 import type { Snapshot } from '../../../lib/types/market';
 import type { ChartOrderPanelState } from '../../../lib/chart-order-settings';
+import { DEFAULT_BUBBLE_SETTINGS, normalizeBubbleSettings, type BubbleSettings } from '../domain/bubble';
+import { OrderFlowBubbleIndicator } from './order-flow-bubble-indicator';
+import { OrderFlowVolumeProfileDrawingLayer } from './order-flow-volume-profile';
+import { OrderFlowBubbleSettingsDialog } from './order-flow-bubble-settings-dialog';
 import { FootprintPanel } from './footprint-panel';
-import { OrderFlowKlinePanel } from './order-flow-kline-panel';
 import * as styles from './order-flow-workspace-panel.css';
 
-export type OrderFlowView = 'orderflow' | 'native' | 'footprint';
+export type OrderFlowView = 'orderflow' | 'footprint';
 const VIEWS: ReadonlyArray<{ id: OrderFlowView; label: string }> = [
     { id: 'orderflow', label: 'Flow K 線' },
-    { id: 'native', label: '完整 K 線' },
     { id: 'footprint', label: 'Footprint' },
 ];
 function viewKey(id: string) {
     return `sj-pro-orderflow-view-${id}`;
 }
+function bubbleKey(id: string) {
+    return `sj-pro-orderflow-kline-${id}`;
+}
 function initialView(id: string): OrderFlowView {
     try {
-        const raw = localStorage.getItem(viewKey(id));
-        if (VIEWS.some((item) => item.id === raw)) return raw as OrderFlowView;
+        // Previously saved "native" mode now migrates to unified Flow K-line.
+        return localStorage.getItem(viewKey(id)) === 'footprint' ? 'footprint' : 'orderflow';
     } catch {
-        // Private browsing/storage policy: use default.
+        return 'orderflow';
     }
-    return 'orderflow';
 }
-function persistView(id: string, mode: OrderFlowView) {
-    try { localStorage.setItem(viewKey(id), mode); } catch { /* graceful fallback */ }
+function loadBubble(id: string): BubbleSettings {
+    try {
+        const raw = localStorage.getItem(bubbleKey(id));
+        const data = raw ? JSON.parse(raw) as { bubble?: Partial<BubbleSettings> } : null;
+        return normalizeBubbleSettings(data?.bubble);
+    } catch {
+        return { ...DEFAULT_BUBBLE_SETTINGS };
+    }
+}
+function persistView(id: string, view: OrderFlowView) {
+    try { localStorage.setItem(viewKey(id), view); } catch { /* storage unavailable */ }
+}
+function persistBubble(id: string, bubble: BubbleSettings) {
+    try { localStorage.setItem(bubbleKey(id), JSON.stringify({ bubble })); }
+    catch { /* storage unavailable */ }
 }
 
-/** An independent panel switcher. It never adds tools to native CandleChart. */
+/** Kline and Footprint share one block identity but retain separate runtime leases. */
 export function OrderFlowWorkspacePanel({
     panelId, contract, sessionMode, onSessionModeChange,
-    trades = [], onOrdersChanged, orderSettings, onOrderSettingsChange,
-    snapshot,
+    trades = [], onOrdersChanged, orderSettings, onOrderSettingsChange, snapshot,
 }: {
     panelId: string;
     contract: ContractInfo;
@@ -50,10 +67,77 @@ export function OrderFlowWorkspacePanel({
     onOrderSettingsChange?: (next: ChartOrderPanelState) => void;
 }) {
     const [view, setView] = useState<OrderFlowView>(() => initialView(panelId));
+    const [bubbleSettings, setBubbleSettings] = useState<BubbleSettings>(
+        () => loadBubble(panelId),
+    );
+    const [bubbleDialogOpen, setBubbleDialogOpen] = useState(false);
+    const [vpDrawingActive, setVpDrawingActive] = useState(false);
+    useEffect(() => {
+        persistBubble(panelId, bubbleSettings);
+    }, [panelId, bubbleSettings]);
+    const patchBubble = (patch: Partial<BubbleSettings>) => {
+        setBubbleSettings((current) => normalizeBubbleSettings({ ...current, ...patch }));
+    };
     const selectView = (next: OrderFlowView) => {
+        setVpDrawingActive(false);
+        setBubbleDialogOpen(false);
         setView(next);
         persistView(panelId, next);
     };
+
+    const extension: CandleChartExtension = {
+        indicator: {
+            label: 'Order Flow 成交氣泡',
+            description: '買賣主動成交 Bubble · 累積 Delta / 單筆 / N 秒模式',
+            enabled: bubbleSettings.enabled,
+            onSelect: () => {
+                if (!bubbleSettings.enabled) patchBubble({ enabled: true });
+                setBubbleDialogOpen(true);
+            },
+        },
+        drawing: {
+            label: 'VP 畫圖',
+            active: vpDrawingActive,
+            onActiveChange: setVpDrawingActive,
+        },
+        renderOverlay: ({
+            hostRef, chartRef, candleRef, timeframeMinutes, dayOnly,
+            historyRevision, colors, tradeModeArmed, drawingToolArmed,
+        }) => (
+            <>
+                <OrderFlowVolumeProfileDrawingLayer
+                    panelId={panelId}
+                    contract={contract}
+                    timeframeMinutes={timeframeMinutes}
+                    dayOnly={dayOnly}
+                    runtimeSession={dayOnly ? 'day' : 'all'}
+                    historyRevision={historyRevision}
+                    active={vpDrawingActive}
+                    interactionLocked={tradeModeArmed || drawingToolArmed}
+                    onActiveChange={setVpDrawingActive}
+                    hostRef={hostRef}
+                    chartRef={chartRef}
+                    candleRef={candleRef}
+                    colors={colors}
+                />
+                {bubbleSettings.enabled && (
+                    <OrderFlowBubbleIndicator
+                        contract={contract}
+                        timeframeMinutes={timeframeMinutes}
+                        dayOnly={dayOnly}
+                        runtimeSession={dayOnly ? 'day' : 'all'}
+                        historyRevision={historyRevision}
+                        settings={bubbleSettings}
+                        hostRef={hostRef}
+                        chartRef={chartRef}
+                        candleRef={candleRef}
+                        colors={colors}
+                    />
+                )}
+            </>
+        ),
+    };
+
     return (
         <div className={styles.shell} data-orderflow-view={view}>
             <div className={styles.switcher} role='group' aria-label='Order Flow 圖表模式'>
@@ -69,40 +153,40 @@ export function OrderFlowWorkspacePanel({
                     </button>
                 ))}
                 <span className={styles.hint}>
-                    {view === 'native'
-                        ? '原生完整功能（含原生圖表交易操作）'
-                        : view === 'footprint'
-                          ? 'Bid × Ask 成交足跡 · 唯讀'
-                          : '成交氣泡 / VP 畫圖 · 唯讀'}
+                    {view === 'footprint'
+                        ? 'Bid × Ask 成交足跡 · 唯讀'
+                        : '原生畫圖／指標／點價交易＋Flow Bubble／VP'}
                 </span>
             </div>
             {view === 'orderflow' && (
-                <OrderFlowKlinePanel
-                    panelId={panelId}
-                    contract={contract}
-                    sessionMode={sessionMode}
-                    onSessionModeChange={onSessionModeChange}
-                />
+                <>
+                    <QuoteBoard contract={contract} snapshot={snapshot} />
+                    <CandleChart
+                        panelId={`${panelId}-native`}
+                        contract={contract}
+                        trades={trades}
+                        onOrdersChanged={onOrdersChanged}
+                        sessionMode={sessionMode}
+                        onSessionModeChange={onSessionModeChange}
+                        orderSettings={orderSettings}
+                        onOrderSettingsChange={onOrderSettingsChange}
+                        extension={extension}
+                    />
+                </>
             )}
-            {view === 'native' && (<>
-                <QuoteBoard contract={contract} snapshot={snapshot} />
-                <CandleChart
-                    panelId={`${panelId}-native`}
-                    contract={contract}
-                    trades={trades}
-                    onOrdersChanged={onOrdersChanged}
-                    sessionMode={sessionMode}
-                    onSessionModeChange={onSessionModeChange}
-                    orderSettings={orderSettings}
-                    onOrderSettingsChange={onOrderSettingsChange}
-                />
-            </>)}
             {view === 'footprint' && (
                 <FootprintPanel
                     panelId={`${panelId}-footprint`}
                     contract={contract}
                     sessionMode={sessionMode}
                     onSessionModeChange={onSessionModeChange}
+                />
+            )}
+            {bubbleDialogOpen && view === 'orderflow' && (
+                <OrderFlowBubbleSettingsDialog
+                    settings={bubbleSettings}
+                    onPatch={patchBubble}
+                    onClose={() => setBubbleDialogOpen(false)}
                 />
             )}
         </div>

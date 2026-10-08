@@ -35,7 +35,7 @@ import {
     Star,
     X,
 } from 'lucide-react';
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import {
     inOrderLabelArea,
     orderLineMayTakePointer,
@@ -84,7 +84,7 @@ import { setHoverPickedPrice, setPickedPrice } from '../lib/price-sync';
 import { cancelOrder, updateOrderPrice } from '../lib/shioaji';
 import { canUpdateOrderPrice } from '../lib/odd-lot';
 import { resetEscCancelArm } from '../lib/esc-cancel-arm';
-import { baseMode, getChartColors, useThemeSettings, themeKey as themeKeyOf } from '../lib/theme-store';
+import { baseMode, getChartColors, useThemeSettings, themeKey as themeKeyOf, type ChartColors } from '../lib/theme-store';
 import { notify, placeQuickOrder } from '../lib/trade';
 import { ORDER_CONTEXT_CHANGED_MESSAGE, useOrderContext } from '../hooks/use-order-context';
 import {
@@ -160,6 +160,36 @@ const MAX_HISTORY_DAYS = 1095; // ~3 years
 
 export type { ChartSessionMode };
 
+/**
+ * Opt-in Flow chart extension. Original `chart` routes never supply this prop.
+ * Execution, account confirmation, native drawings and indicators stay owned
+ * by CandleChart; the extension can only render additional analysis overlays.
+ */
+export interface CandleChartExtension {
+    indicator?: {
+        label: string;
+        description: string;
+        enabled: boolean;
+        onSelect: () => void;
+    };
+    drawing?: {
+        label: string;
+        active: boolean;
+        onActiveChange: (active: boolean) => void;
+    };
+    renderOverlay: (ctx: {
+        hostRef: RefObject<HTMLDivElement | null>;
+        chartRef: RefObject<IChartApi | null>;
+        candleRef: RefObject<ISeriesApi<'Candlestick'> | null>;
+        timeframeMinutes: number;
+        dayOnly: boolean;
+        historyRevision: number;
+        colors: ChartColors;
+        tradeModeArmed: boolean;
+        drawingToolArmed: boolean;
+    }) => ReactNode;
+}
+
 export function CandleChart({
     panelId,
     contract,
@@ -169,6 +199,7 @@ export function CandleChart({
     onSessionModeChange,
     orderSettings: orderSettingsProp,
     onOrderSettingsChange,
+    extension,
 }: {
     panelId?: string;
     contract: ContractBase;
@@ -183,8 +214,13 @@ export function CandleChart({
     // 一起存；沒有時（彈出視窗）只在元件內
     orderSettings?: ChartOrderPanelState;
     onOrderSettingsChange?: (next: ChartOrderPanelState) => void;
+    /** Optional only for the separate orderflow_kline block. */
+    extension?: CandleChartExtension;
 }) {
     const hostRef = useRef<HTMLDivElement>(null);
+    const [extensionChartReady, setExtensionChartReady] = useState(false);
+    const extensionRef = useRef(extension);
+    extensionRef.current = extension;
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
     const volSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
@@ -388,6 +424,10 @@ export function CandleChart({
     modeRef.current = mode;
     const armedDrawingSequenceRef = useRef<number | null>(null);
     const setTradeMode = (next: TradeMode) => {
+        // A click-to-trade tool must disarm the Flow-only VP drawing first.
+        if (next !== 'observe' && extensionRef.current?.drawing?.active) {
+            extensionRef.current.drawing.onActiveChange(false);
+        }
         modeRef.current = next;
         armedDrawingSequenceRef.current = next === 'observe' ? null : drawingsRef.current?.interactionSequence() ?? null;
         setMode(next);
@@ -493,8 +533,12 @@ export function CandleChart({
         chartRef.current = chart;
         candleSeriesRef.current = candles;
         volSeriesRef.current = vol;
+        if (extensionRef.current) setExtensionChartReady(true);
 
         chart.subscribeClick((param) => {
+            // Flow VP drawing owns clicks while armed; never turn those
+            // anchor clicks into a trade or a native picked price.
+            if (extensionRef.current?.drawing?.active) return;
             // 第二道防線：畫圖選取／草稿／拖曳／文字／量測均不能進入下單路徑。
             if (drawingsRef.current?.drawingBusy()) return;
             const m = modeRef.current;
@@ -628,6 +672,7 @@ export function CandleChart({
 
         return () => {
             chart.remove();
+            if (extensionRef.current) setExtensionChartReady(false);
             chartRef.current = null;
             candleSeriesRef.current = null;
             volSeriesRef.current = null;
@@ -1557,6 +1602,12 @@ export function CandleChart({
     });
     drawingArmedRef.current = drawings.tool !== null;
     drawingsRef.current = drawings;
+    // Selecting a native drawing tool automatically leaves the Flow VP mode.
+    useEffect(() => {
+        if (drawings.tool && extension?.drawing?.active) {
+            extension.drawing.onActiveChange(false);
+        }
+    }, [drawings.tool, extension?.drawing?.active]);
 
     // 畫圖存不進 localStorage（配額滿）— 畫面上的物件還在，但關掉就沒了。
     // 多張圖同時訂閱，notice 只由第一張拿到的圖發出
@@ -1896,10 +1947,26 @@ export function CandleChart({
                         contractLabel={`${contract.code}${(contract as { name?: string }).name ? ` ${(contract as { name?: string }).name}` : ''}`}
                     />
                 )}
+                {extension?.drawing && (
+                    <button
+                        type='button'
+                        className={styles.modeBtn[extension.drawing.active ? 'armed' : 'normal']}
+                        title='Flow 專用時間範圍成交量分布畫圖'
+                        onClick={() => {
+                            if (!extension.drawing!.active) {
+                                setTradeMode('observe');
+                                drawings.setTool(null);
+                            }
+                            extension.drawing!.onActiveChange(!extension.drawing!.active);
+                        }}
+                    >
+                        {extension.drawing.label}
+                    </button>
+                )}
                 <button
                     className={
                         styles.indicatorBtn[
-                            instances.length > 0 ? 'active' : 'normal'
+                            instances.length > 0 || extension?.indicator?.enabled ? 'active' : 'normal'
                         ]
                     }
                     onClick={() => setPickerOpen(true)}
@@ -1911,6 +1978,13 @@ export function CandleChart({
                         instances={instances}
                         onAdd={addIndicator}
                         onClose={() => setPickerOpen(false)}
+                        extraIndicator={extension?.indicator && {
+                            ...extension.indicator,
+                            onSelect: () => {
+                                setPickerOpen(false);
+                                extension.indicator!.onSelect();
+                            },
+                        }}
                         onSaveDefaults={panelService ? () => {
                             saveInstances(savedInstances);
                             notify({ kind: 'info', title: '已儲存指標預設', body: '新圖與回測圖表使用此設定；其他現有面板維持原設定。' });
@@ -2090,6 +2164,13 @@ export function CandleChart({
                     );
                 })}
                 <ChartDrawingOverlays api={drawings} />
+                {extension && extensionChartReady && extension.renderOverlay({
+                    hostRef, chartRef, candleRef: candleSeriesRef,
+                    timeframeMinutes: tf.minutes, dayOnly,
+                    historyRevision: historySeq, colors,
+                    tradeModeArmed: mode !== 'observe',
+                    drawingToolArmed: drawings.tool !== null,
+                })}
             </div>
             <ChartObjectList api={drawings} />
             </div>

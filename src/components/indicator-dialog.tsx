@@ -89,11 +89,19 @@ export function IndicatorDialog({
     onAdd,
     onClose,
     onSaveDefaults,
+    extraIndicator,
 }: {
     instances: IndicatorInstance[];
     onAdd: (type: string) => void;
     onClose: () => void;
     onSaveDefaults?: () => void;
+    /** Only populated by the optional Flow chart extension. */
+    extraIndicator?: {
+        label: string;
+        description: string;
+        enabled: boolean;
+        onSelect: () => void;
+    };
 }) {
     const [query, setQuery] = useState('');
     const [category, setCategory] = useState<Category>('all');
@@ -154,6 +162,10 @@ export function IndicatorDialog({
     const filtered = allDefs.filter((d) => matches(d) && inCategory(d));
     const overlays = filtered.filter((d) => d.category === 'overlay');
     const panes = filtered.filter((d) => d.category === 'pane');
+    const showExtra = !!extraIndicator &&
+        (category === 'all' || category === 'overlay') &&
+        (!q || `${extraIndicator.label} ${extraIndicator.description} bubble 氣泡`
+            .toLowerCase().includes(q));
 
     const renderRow = (d: IndicatorDef) => {
         const added = counts.get(d.type) ?? 0;
@@ -305,7 +317,7 @@ export function IndicatorDialog({
                         </button>
                     </div>
                     <div className={styles.list}>
-                        {filtered.length === 0 &&
+                        {filtered.length === 0 && !showExtra &&
                             (category === 'custom' && !q ? (
                                 <div className={styles.empty}>
                                     還沒有自訂指標 —
@@ -316,11 +328,33 @@ export function IndicatorDialog({
                                     沒有符合「{query}」的指標
                                 </div>
                             ))}
-                        {overlays.length > 0 && (
+                        {(overlays.length > 0 || showExtra) && (
                             <>
                                 <div className={styles.listHeader}>
                                     主圖疊加
                                 </div>
+                                {showExtra && extraIndicator && (
+                                    <button
+                                        type='button'
+                                        className={styles.row}
+                                        onClick={extraIndicator.onSelect}
+                                        aria-label={extraIndicator.label}
+                                    >
+                                        <span className={styles.rowSwatch}
+                                            style={{ background: '#ec9c4f' }} />
+                                        <span className={styles.rowMain}>
+                                            <span className={styles.rowName}>
+                                                {extraIndicator.label}
+                                            </span>
+                                            <span className={styles.rowDesc}>
+                                                {extraIndicator.description}
+                                            </span>
+                                        </span>
+                                        {extraIndicator.enabled && (
+                                            <span className={styles.rowAdded}>已啟用</span>
+                                        )}
+                                    </button>
+                                )}
                                 {overlays.map(renderRow)}
                             </>
                         )}
