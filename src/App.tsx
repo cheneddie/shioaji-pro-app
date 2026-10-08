@@ -718,7 +718,8 @@ function PopoutView({
             case 'orderflow_kline':
                 body = (
                     <OrderFlowWorkspacePanel
-                        panelId='popout-orderflow-kline'
+                        key={contract.code}
+                        panelId={`popout-orderflow-kline-${contract.code}`}
                         contract={contract}
                         trades={tradesState.data ?? []}
                         onOrdersChanged={tradesState.refresh}
@@ -726,10 +727,21 @@ function PopoutView({
                     />
                 );
                 break;
+            case 'footprint':
+                body = (
+                    <FootprintPanel
+                        key={contract.code}
+                        panelId={`popout-footprint-${contract.code}`}
+                        contract={contract}
+                        sessionMode={popoutChartSession}
+                    />
+                );
+                break;
             case 'flowladder':
                 body = (
                     <FlowLadderPanel
-                        panelId='popout-flowladder'
+                        key={contract.code}
+                        panelId={`popout-flowladder-${contract.code}`}
                         contract={contract}
                         sessionMode={popoutChartSession}
                     />

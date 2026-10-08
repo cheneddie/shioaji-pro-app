@@ -224,6 +224,20 @@ describe('FootprintPanel lifecycle', () => {
         await act(async () => view.unmount());
     });
 
+    it('continues rendering even if localStorage rejects preference writes', async () => {
+        const denied = vi.spyOn(localStorage, 'setItem')
+            .mockImplementation(() => { throw new Error('QuotaExceededError'); });
+        try {
+            const view = await mountPanel('fp-denied-storage');
+            expect(gridProps(view)['data-bars']).toBe(1);
+            expect(runtime.retain).toHaveBeenCalledTimes(1);
+            await act(async () => view.unmount());
+            expect(runtime.release).toHaveBeenCalledTimes(1);
+        } finally {
+            denied.mockRestore();
+        }
+    });
+
     it('releases the shared runtime on unmount', async () => {
         const view = await mountPanel('fp-3');
         expect(runtime.loadHistory).toHaveBeenCalledTimes(1);

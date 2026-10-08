@@ -84,6 +84,34 @@ describe('Order Flow extension native-panel baseline', () => {
         expect(dom).not.toContain('placeQuickOrder');
     });
 
+    it('routes each Order Flow popout panel and partitions its preferences by symbol', () => {
+        const start = appSource.indexOf('function PopoutView(');
+        expect(start).toBeGreaterThanOrEqual(0);
+        const end = appSource.indexOf('export default function App()', start);
+        const popout = appSource.slice(start, end);
+
+        const caseBody = (type: 'orderflow_kline' | 'footprint' | 'flowladder') => {
+            const marker = `case '${type}':`;
+            const offset = popout.indexOf(marker);
+            expect(offset, `missing popout route: ${type}`).toBeGreaterThanOrEqual(0);
+            const next = popout.indexOf("\n            case '", offset + marker.length);
+            return popout.slice(offset, next < 0 ? popout.length : next);
+        };
+        const cases = [
+            { type: 'orderflow_kline' as const, component: 'OrderFlowWorkspacePanel', prefix: 'popout-orderflow-kline-' },
+            { type: 'footprint' as const, component: 'FootprintPanel', prefix: 'popout-footprint-' },
+            { type: 'flowladder' as const, component: 'FlowLadderPanel', prefix: 'popout-flowladder-' },
+        ];
+        for (const { type, component, prefix } of cases) {
+            const source = caseBody(type);
+            expect(source).toContain(`<${component}`);
+            expect(source).toContain('key={contract.code}');
+            expect(source).toContain('panelId={`' + prefix + '${contract.code}`}');
+        }
+        // The native 'chart' popout does not opt into the Flow extension.
+        expect(popout).toContain("case 'chart':");
+    });
+
     it('keeps Footprint isolated from native panels and direct market subscriptions', () => {
         const source = readFileSync(
             new URL('../features/orderflow/components/footprint-panel.tsx', import.meta.url),

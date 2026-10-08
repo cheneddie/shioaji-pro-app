@@ -72,6 +72,12 @@ export function fetchOrderFlowHistory(
                 },
             );
             return { date, ticks };
+        }).catch((error) => {
+            // A transient network/broker failure must not poison this
+            // request key forever. Keep concurrent callers coalesced during
+            // the failed attempt but allow a later same-revision retry.
+            if (requests.get(key) === request) requests.delete(key);
+            throw error;
         });
         requests.set(key, request);
         if (requests.size > ORDER_FLOW_HISTORY_CACHE_LIMIT) {
