@@ -12,7 +12,6 @@ import {
 } from 'react';
 import type { ChartColors } from '../../../lib/theme-store';
 import type { ContractInfo } from '../../../lib/types/contract';
-import { snapshotRecentRawTicks } from '../../../lib/stream';
 import {
     BubbleAggregator,
     bubbleTradeFromHistory,
@@ -24,7 +23,7 @@ import {
 } from '../domain/bubble';
 import type { OrderFlowSession } from '../domain/types';
 import { getOrderFlowRuntime } from '../runtime/order-flow-runtime';
-import { normalizeOrderFlowTick, type OrderFlowRawTick } from '../runtime/market-event-bridge';
+import type { OrderFlowRawTick } from '../runtime/market-event-bridge';
 import {
     orderFlowEventTradingDate,
     orderFlowExpectedStartMs,
@@ -131,11 +130,10 @@ export function OrderFlowBubbleIndicator({
 
         loadedKeyRef.current = '';
         tradesRef.current = [];
-        const sourceCode = (contract.target_code || contract.code).trim().toUpperCase();
-        const replay = snapshotRecentRawTicks(sourceCode);
+        const replay = runtime.bufferedTicks();
         const bufferedTrades = replay.ticks
             .map((raw) => bubbleTradeFromRaw(
-                normalizeOrderFlowTick(raw),
+                raw,
                 timeframeMinutes,
                 contract.security_type,
                 dayOnly,
