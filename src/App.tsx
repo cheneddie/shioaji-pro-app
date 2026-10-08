@@ -717,8 +717,11 @@ function PopoutView({
                 break;
             case 'orderflow_kline':
                 body = (
-                    <OrderFlowKlinePanel
+                    <OrderFlowWorkspacePanel
+                        panelId='popout-orderflow-kline'
                         contract={contract}
+                        trades={tradesState.data ?? []}
+                        onOrdersChanged={tradesState.refresh}
                         sessionMode={popoutChartSession}
                     />
                 );
