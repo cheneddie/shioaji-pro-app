@@ -193,6 +193,41 @@ describe('shared OrderFlowRuntime ownership', () => {
         expect(mocks.releaseFns.every((fn) => fn.mock.calls.length === 1)).toBe(true);
     });
 
+    it('shares a single raw stream across three panel-like consumers until the last one releases', async () => {
+        const { getOrderFlowRuntime } = await import('./order-flow-runtime');
+        const runtime = getOrderFlowRuntime(contract, 'all');
+        const releases = Array.from({ length: 3 }, () => runtime.retain());
+        const subscribers = [vi.fn(), vi.fn(), vi.fn()];
+        const offs = subscribers.map((fn) => runtime.subscribeTicks(fn));
+        expect(mocks.ensure).toHaveBeenCalledOnce();
+        expect(mocks.tickBridgeArgs).toHaveLength(1);
+        expect(mocks.bookBridgeArgs).toHaveLength(1);
+        expect(mocks.retain).toHaveBeenCalledTimes(2);
+
+        const event = tick('10:00:00.000', {volume: 4, totalVolume: 104});
+        mocks.tickListener!(event);
+        mocks.tickListener!(event); // reconnect replay: must not double fan out
+        subscribers.forEach((subscriber) => expect(subscriber).toHaveBeenCalledOnce());
+
+        offs[0]!();
+        releases[0]!();
+        offs[1]!();
+        releases[1]!();
+        expect(mocks.offTick).not.toHaveBeenCalled();
+        mocks.tickListener!(tick('10:00:01.000', {volume: 2, totalVolume: 106}));
+        expect(subscribers[2]).toHaveBeenCalledTimes(2);
+        expect(subscribers[0]).toHaveBeenCalledOnce();
+        expect(subscribers[1]).toHaveBeenCalledOnce();
+
+        offs[2]!();
+        releases[2]!();
+        expect(mocks.offTick).toHaveBeenCalledOnce();
+        expect(mocks.offBook).toHaveBeenCalledOnce();
+        expect(mocks.offStatus).toHaveBeenCalledOnce();
+        expect(runtime.getSnapshot().levels.find((r) => r.price === 27110)?.dailyTotal).toBe(6);
+        expect(mocks.releaseFns.every((fn) => fn.mock.calls.length === 1)).toBe(true);
+    });
+
     it('partitions runtime identity by symbol, physical source and session and removes disposed instances from the registry', async () => {
         const { getOrderFlowRuntime } = await import('./order-flow-runtime');
         const all = getOrderFlowRuntime(contract, 'all');
@@ -366,6 +401,37 @@ describe('OrderFlowRuntime aggregation and health', () => {
             movingNeutral: 3,
             movingTotal: 10,
             movingDelta: 3,
+        });
+        release();
+    });
+
+    it('does not overwrite newer history health with older requests that settle late', async () => {
+        const { getOrderFlowRuntime } = await import('./order-flow-runtime');
+        const runtime = getOrderFlowRuntime(contract, 'all');
+        const release = runtime.retain();
+
+        let resolveOlder!: (value: {date:string; ticks:[]}) => void;
+        let resolveNewer!: (value: {date:string; ticks:[]}) => void;
+        mocks.history.mockImplementation((_contract: unknown, date: string) => {
+            return new Promise<{date:string; ticks:[]}>((resolve) => {
+                if (date === '2026-10-06') resolveOlder = resolve;
+                else resolveNewer = resolve;
+            });
+        });
+        const older = runtime.loadHistory('2026-10-06');
+        const newer = runtime.loadHistory('2026-10-07');
+        expect(runtime.getSnapshot().health.history).toEqual({
+            status: 'loading', date: '2026-10-07',
+        });
+        resolveNewer({date:'2026-10-07', ticks:[]});
+        await newer;
+        expect(runtime.getSnapshot().health.history).toEqual({
+            status: 'ready', date: '2026-10-07',
+        });
+        resolveOlder({date:'2026-10-06', ticks:[]});
+        await older;
+        expect(runtime.getSnapshot().health.history).toEqual({
+            status: 'ready', date: '2026-10-07',
         });
         release();
     });

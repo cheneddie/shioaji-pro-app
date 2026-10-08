@@ -66,6 +66,26 @@ describe('Order Flow history cache', () => {
         expect(mocks.fetch).toHaveBeenCalledTimes(2);
     });
 
+    it('coalesces a failing history request but retries the exact same key after rejection', async () => {
+        const { fetchOrderFlowHistory } = await import('./order-flow-history');
+        mocks.fetch.mockRejectedValueOnce(new Error('broker temporarily offline'));
+        const a = fetchOrderFlowHistory(contract, '2026-10-07');
+        const b = fetchOrderFlowHistory({ ...contract }, '2026-10-07');
+        expect(a).toBe(b);
+        await expect(a).rejects.toThrow('broker temporarily offline');
+        await expect(b).rejects.toThrow('broker temporarily offline');
+        expect(mocks.fetch).toHaveBeenCalledTimes(1);
+
+        const recovered = await fetchOrderFlowHistory(contract, '2026-10-07');
+        expect(mocks.fetch).toHaveBeenCalledTimes(2);
+        expect(recovered.ticks[0]).toMatchObject({
+            volume: 3, side: 'sell',
+        });
+        const cached = await fetchOrderFlowHistory(contract, '2026-10-07');
+        expect(cached).toBe(recovered);
+        expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    });
+
     it('bounds the request cache and evicts the oldest entry', async () => {
         const { fetchOrderFlowHistory } = await import('./order-flow-history');
         for (let day = 1; day <= 65; day++) {
